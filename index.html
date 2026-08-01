@@ -63,9 +63,6 @@
   .login-card .clockmark{margin:0 auto 14px;}
   .login-card h1{text-align:center; font-size:18px; margin:0 0 4px;}
   .login-card p{text-align:center; font-size:12.5px; color:var(--ink-soft); margin:0 0 22px;}
-  .tabs{display:flex; gap:6px; margin-bottom:16px;}
-  .tabs button{flex:1; padding:8px; border:1px solid var(--line); background:#fbfcfd; border-radius:6px; font-size:12.5px; font-weight:600; cursor:pointer;}
-  .tabs button.active{background:var(--navy); color:#fff; border-color:var(--navy);}
   .err{color:var(--warn); font-size:12.5px; margin-top:8px; min-height:16px;}
 </style>
 </head>
@@ -90,8 +87,24 @@ function toast(msg){
 function toMinutes(s){ if(!s) return null; const [h,m]=s.split(':').map(Number); return h*60+m; }
 function diffHours(a,b){ const s=toMinutes(a),e=toMinutes(b); if(s===null||e===null) return 0; let d=e-s; if(d<=0) d+=24*60; return d/60; }
 function fmtHours(h){ const hrs=Math.floor(h); const mins=Math.round((h-hrs)*60); return hrs+'h'+(mins?' '+mins+'m':''); }
-function roleLabel(r){ return {employee:'Employee', immediate_head:'Immediate Head', senior_ops_manager:'Senior Ops Manager', hr:'Human Resource'}[r] || r; }
-function statusLabel(s){ return {pending_head:'Awaiting Immediate Head', pending_senior:'Awaiting Senior Ops Manager', approved:'Approved', rejected:'Rejected'}[s] || s; }
+
+function roleLabel(r){ 
+  return {
+    employee: 'Employee', 
+    immediate_head: 'Supervisor (Approver 1)', 
+    senior_ops_manager: 'Senior Operations Manager (Approver 2)', 
+    hr: 'Human Resource'
+  }[r] || r; 
+}
+
+function statusLabel(s){ 
+  return {
+    pending_head: 'Awaiting Supervisor (Approver 1)', 
+    pending_senior: 'Awaiting Senior Ops Manager (Approver 2)', 
+    approved: 'Approved', 
+    rejected: 'Rejected'
+  }[s] || s; 
+}
 
 async function init(){
   const { data:{ session } } = await sb.auth.getSession();
@@ -134,10 +147,15 @@ async function logout(){ await sb.auth.signOut(); }
 
 async function loadForRole(){
   const role = state.me.role;
-  if(role === 'employee'){
+  if(role === 'employee' || role === 'immediate_head'){
     const { data } = await sb.from('ot_requests').select('*, ot_entries(*)').eq('employee_id', state.me.id).order('created_at', {ascending:false});
     state.requests = data || [];
-  } else if(role === 'immediate_head' || role === 'senior_ops_manager'){
+  } 
+  
+  if(role === 'immediate_head'){
+    const { data } = await sb.from('ot_requests').select('*, ot_entries(*), employees!ot_requests_employee_id_fkey(full_name, employee_no, position)').order('created_at', {ascending:false});
+    state.requests = data || [];
+  } else if(role === 'senior_ops_manager'){
     const { data } = await sb.from('ot_requests').select('*, ot_entries(*), employees!ot_requests_employee_id_fkey(full_name, employee_no, position)').order('created_at', {ascending:false});
     state.requests = data || [];
   } else if(role === 'hr'){
@@ -168,7 +186,7 @@ function render(){
 
   const main = document.getElementById('main');
   if(state.me.role === 'employee') main.innerHTML = employeeView();
-  else if(state.me.role === 'immediate_head') main.innerHTML = approverView('immediate_head');
+  else if(state.me.role === 'immediate_head') main.innerHTML = supervisorView();
   else if(state.me.role === 'senior_ops_manager') main.innerHTML = approverView('senior_ops_manager');
   else main.innerHTML = hrView();
   attachViewHandlers();
@@ -211,7 +229,8 @@ function employeeView(){
   }).join('');
   const total = draftRows.reduce((s,r)=> s + (r.otStart&&r.otEnd?diffHours(r.otStart,r.otEnd):0), 0);
 
-  const list = state.requests.map(reqCard('employee')).join('') || `<div class="empty">No requests filed yet.</div>`;
+  const myRequests = state.requests.filter(r => r.employee_id === state.me.id);
+  const list = myRequests.map(reqCard('employee')).join('') || `<div class="empty">No requests filed yet.</div>`;
 
   return `
   <div class="panel">
@@ -229,13 +248,34 @@ function employeeView(){
   <div class="panel"><h2>My requests</h2>${list}</div>`;
 }
 
+function supervisorView(){
+  const filingSection = employeeView();
+  
+  const pending = state.requests.filter(r => r.status === 'pending_head' && r.employee_id !== state.me.id);
+  const others = state.requests.filter(r => r.status !== 'pending_head' || r.employee_id === state.me.id);
+  const reportRows = buildReportRows(state.requests.filter(r=>r.status==='approved'));
+
+  return `
+  ${filingSection}
+  <div class="panel">
+    <h2>Team Requests Pending Your Approval (Approver 1)</h2>
+    <p class="hint">Approving here forwards the request to the Senior Operations Manager (Approver 2).</p>
+    ${pending.map(reqCard('immediate_head')).join('') || `<div class="empty">No pending team requests.</div>`}
+  </div>
+  <div class="panel"><h2>All other team requests (monitoring)</h2>${others.map(reqCard('immediate_head')).join('') || `<div class="empty">Nothing here yet.</div>`}</div>
+  <div class="panel"><h2>Report &mdash; approved OT hours by employee</h2>
+    <table><thead><tr><th>Employee</th><th>Employee No.</th><th>Total OT Hours</th></tr></thead><tbody>${reportRows}</tbody></table>
+  </div>`;
+}
+
 function reqCard(viewer){
   return (req)=>{
     const emp = req.employees || state.me;
     const badge = `<span class="badge badge-${req.status}">${statusLabel(req.status)}</span>`;
     const rows = (req.ot_entries||[]).map(e=>`<tr><td class="mono">${e.entry_date}</td><td>${e.reason||'&mdash;'}</td><td class="mono">${e.duty_start||''}&ndash;${e.duty_end||''}</td><td class="mono">${e.ot_start}&ndash;${e.ot_end}</td><td class="mono">${fmtHours(e.ot_hours)}</td></tr>`).join('');
     let actions = '';
-    if(viewer==='immediate_head' && req.status==='pending_head'){
+    
+    if(viewer==='immediate_head' && req.status==='pending_head' && req.employee_id !== state.me.id){
       actions = `<div class="row-actions"><button class="btn btn-ok btn-sm act-approve-head" data-id="${req.id}">Approve &rarr; Senior Ops Mgr</button><button class="btn btn-danger btn-sm act-reject" data-id="${req.id}">Reject</button></div>`;
     }
     if(viewer==='senior_ops_manager' && req.status==='pending_senior'){
@@ -258,16 +298,14 @@ function reqCard(viewer){
 }
 
 function approverView(role){
-  const isHead = role==='immediate_head';
-  const pendingStatus = isHead ? 'pending_head' : 'pending_senior';
-  const pending = state.requests.filter(r=>r.status===pendingStatus);
-  const others = state.requests.filter(r=>r.status!==pendingStatus);
+  const pending = state.requests.filter(r=>r.status==='pending_senior');
+  const others = state.requests.filter(r=>r.status!=='pending_senior');
   const reportRows = buildReportRows(state.requests.filter(r=>r.status==='approved'));
 
   return `
   <div class="panel">
-    <h2>Pending your approval</h2>
-    <p class="hint">${isHead? 'Approving here forwards the request to the Senior Operations Manager.' : 'This is the final approval step.'}</p>
+    <h2>Pending your final approval (Approver 2)</h2>
+    <p class="hint">This is the final approval step before completion.</p>
     ${pending.map(reqCard(role)).join('') || `<div class="empty">Nothing pending right now.</div>`}
   </div>
   <div class="panel"><h2>All other requests (monitoring)</h2>${others.map(reqCard(role)).join('') || `<div class="empty">Nothing here yet.</div>`}</div>
@@ -341,8 +379,14 @@ async function submitRequest(){
   if(valid.length===0){ toast('Add at least one complete date row'); return; }
   const totalHours = valid.reduce((s,r)=> s+diffHours(r.otStart,r.otEnd), 0);
 
+  // If a supervisor files an OT, automatically bypass Approver 1 and route to Approver 2 (pending_senior)
+  let initialStatus = 'pending_head';
+  if (state.me.role === 'immediate_head') {
+    initialStatus = 'pending_senior';
+  }
+
   const { data: reqData, error: reqErr } = await sb.from('ot_requests').insert({
-    employee_id: state.me.id, period, total_hours: totalHours, status: 'pending_head'
+    employee_id: state.me.id, period, total_hours: totalHours, status: initialStatus
   }).select().single();
   if(reqErr){ toast('Submit failed: '+reqErr.message); return; }
 
