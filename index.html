@@ -71,7 +71,6 @@
 <div id="root"><div style="padding:60px; text-align:center; color:var(--ink-soft);">Loading&hellip;</div></div>
 
 <script>
-// Supabase project credentials
 const SUPABASE_URL = "https://nspqyprppnguviiixfif.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5zcHF5cHJwcG5ndXZpaWl4ZmlmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU1NDQ4NjIsImV4cCI6MjEwMTEyMDg2Mn0.DHCQESspyYs4OrrC1w7UVk3itMPdfHuOYVfAVSMDGKw";
 
@@ -91,16 +90,16 @@ function fmtHours(h){ const hrs=Math.floor(h); const mins=Math.round((h-hrs)*60)
 function roleLabel(r){ 
   return {
     employee: 'Employee', 
-    immediate_head: 'Supervisor (Approver 1)', 
-    senior_ops_manager: 'Senior Operations Manager (Approver 2)', 
+    immediate_head: 'Supervisor (Level 1 Approver)', 
+    senior_ops_manager: 'Senior Operations Manager (Final Approver)', 
     hr: 'Human Resource'
   }[r] || r; 
 }
 
 function statusLabel(s){ 
   return {
-    pending_head: 'Awaiting Supervisor (Approver 1)', 
-    pending_senior: 'Awaiting Senior Ops Manager (Approver 2)', 
+    pending_head: 'Awaiting Supervisor (Level 1)', 
+    pending_senior: 'Awaiting Senior Ops Manager (Final)', 
     approved: 'Approved', 
     rejected: 'Rejected'
   }[s] || s; 
@@ -147,18 +146,20 @@ async function logout(){ await sb.auth.signOut(); }
 
 async function loadForRole(){
   const role = state.me.role;
-  if(role === 'employee' || role === 'immediate_head'){
+  if(role === 'employee'){
     const { data } = await sb.from('ot_requests').select('*, ot_entries(*)').eq('employee_id', state.me.id).order('created_at', {ascending:false});
     state.requests = data || [];
-  } 
-  
-  if(role === 'immediate_head'){
-    const { data } = await sb.from('ot_requests').select('*, ot_entries(*), employees!ot_requests_employee_id_fkey(full_name, employee_no, position)').order('created_at', {ascending:false});
-    state.requests = data || [];
-  } else if(role === 'senior_ops_manager'){
-    const { data } = await sb.from('ot_requests').select('*, ot_entries(*), employees!ot_requests_employee_id_fkey(full_name, employee_no, position)').order('created_at', {ascending:false});
-    state.requests = data || [];
-  } else if(role === 'hr'){
+  } else if(role === 'immediate_head'){
+    // Fetch requests and filter specifically by supervisor's department
+    const { data } = await sb.from('ot_requests')
+      .select('*, ot_entries(*), employees!ot_requests_employee_id_fkey(full_name, employee_no, position, department_id, departments(name))')
+      .order('created_at', {ascending:false});
+    
+    state.requests = (data || []).filter(r => {
+      const empDept = r.employees?.department_id;
+      return r.employee_id === state.me.id || empDept === state.me.department_id;
+    });
+  } else if(role === 'senior_ops_manager' || role === 'hr'){
     const { data } = await sb.from('ot_requests').select('*, ot_entries(*), employees!ot_requests_employee_id_fkey(full_name, employee_no, position, department_id, departments(name))').order('created_at', {ascending:false});
     state.requests = data || [];
   }
@@ -258,12 +259,12 @@ function supervisorView(){
   return `
   ${filingSection}
   <div class="panel">
-    <h2>Team Requests Pending Your Approval (Approver 1)</h2>
-    <p class="hint">Approving here forwards the request to the Senior Operations Manager (Approver 2).</p>
-    ${pending.map(reqCard('immediate_head')).join('') || `<div class="empty">No pending team requests.</div>`}
+    <h2>Department Team Requests Pending Your Approval (Level 1)</h2>
+    <p class="hint">Approving here forwards the request to the Senior Operations Manager (Final Approver).</p>
+    ${pending.map(reqCard('immediate_head')).join('') || `<div class="empty">No pending team requests for your department.</div>`}
   </div>
-  <div class="panel"><h2>All other team requests (monitoring)</h2>${others.map(reqCard('immediate_head')).join('') || `<div class="empty">Nothing here yet.</div>`}</div>
-  <div class="panel"><h2>Report &mdash; approved OT hours by employee</h2>
+  <div class="panel"><h2>All other department requests (monitoring)</h2>${others.map(reqCard('immediate_head')).join('') || `<div class="empty">Nothing here yet.</div>`}</div>
+  <div class="panel"><h2>Report &mdash; approved OT hours by department staff</h2>
     <table><thead><tr><th>Employee</th><th>Employee No.</th><th>Total OT Hours</th></tr></thead><tbody>${reportRows}</tbody></table>
   </div>`;
 }
@@ -276,7 +277,7 @@ function reqCard(viewer){
     let actions = '';
     
     if(viewer==='immediate_head' && req.status==='pending_head' && req.employee_id !== state.me.id){
-      actions = `<div class="row-actions"><button class="btn btn-ok btn-sm act-approve-head" data-id="${req.id}">Approve &rarr; Senior Ops Mgr</button><button class="btn btn-danger btn-sm act-reject" data-id="${req.id}">Reject</button></div>`;
+      actions = `<div class="row-actions"><button class="btn btn-ok btn-sm act-approve-head" data-id="${req.id}">Approve &rarr; Final Approver</button><button class="btn btn-danger btn-sm act-reject" data-id="${req.id}">Reject</button></div>`;
     }
     if(viewer==='senior_ops_manager' && req.status==='pending_senior'){
       actions = `<div class="row-actions"><button class="btn btn-ok btn-sm act-approve-senior" data-id="${req.id}">Final approve</button><button class="btn btn-danger btn-sm act-reject" data-id="${req.id}">Reject</button></div>`;
@@ -304,7 +305,7 @@ function approverView(role){
 
   return `
   <div class="panel">
-    <h2>Pending your final approval (Approver 2)</h2>
+    <h2>Pending your final approval (Senior Operations Manager)</h2>
     <p class="hint">This is the final approval step before completion.</p>
     ${pending.map(reqCard(role)).join('') || `<div class="empty">Nothing pending right now.</div>`}
   </div>
@@ -379,7 +380,7 @@ async function submitRequest(){
   if(valid.length===0){ toast('Add at least one complete date row'); return; }
   const totalHours = valid.reduce((s,r)=> s+diffHours(r.otStart,r.otEnd), 0);
 
-  // If a supervisor files an OT, automatically bypass Approver 1 and route to Approver 2 (pending_senior)
+  // If a supervisor files an OT, automatically bypass Level 1 and route straight to Final Approver
   let initialStatus = 'pending_head';
   if (state.me.role === 'immediate_head') {
     initialStatus = 'pending_senior';
