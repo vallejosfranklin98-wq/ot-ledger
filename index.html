@@ -1,12 +1,366 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Overtime Ledger</title>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
-  </body>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Overtime Request Ledger</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root{
+    --navy:#1F3A5F; --navy-dark:#16283F; --amber:#E8A33D; --amber-dark:#C6822A;
+    --paper:#F4F6F8; --line:#D9DEE4; --ink:#20293A; --ink-soft:#5A6577;
+    --ok:#2F7D5A; --warn:#C24A3B;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0; background:var(--paper); color:var(--ink); font-family:'Segoe UI',Helvetica,Arial,sans-serif;}
+  .mono{font-family:Consolas,'SFMono-Regular',Menlo,monospace; font-variant-numeric:tabular-nums;}
+  header.app{background:var(--navy); color:#fff; padding:18px 26px; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px;}
+  .brand{display:flex; align-items:center; gap:12px;}
+  .clockmark{width:34px; height:34px; border-radius:50%; border:2px solid var(--amber); position:relative; flex-shrink:0;}
+  .clockmark::before,.clockmark::after{content:""; position:absolute; background:var(--amber); left:50%; top:50%; transform-origin:0 0;}
+  .clockmark::before{width:1.5px; height:9px; transform:translate(-50%,-100%) rotate(35deg);}
+  .clockmark::after{width:1.5px; height:11px; transform:translate(-50%,-100%) rotate(160deg);}
+  header.app h1{font-size:17px; margin:0; font-weight:600;}
+  header.app .sub{font-size:11.5px; color:#B9C6D6;}
+  .who{display:flex; align-items:center; gap:12px; font-size:13px;}
+  .who .role-pill{background:rgba(255,255,255,.12); padding:4px 10px; border-radius:20px; font-size:11px; text-transform:uppercase; letter-spacing:.4px; color:var(--amber); font-weight:700;}
+  .btn{border:none; border-radius:6px; padding:9px 15px; font-size:13.5px; font-weight:600; cursor:pointer;}
+  .btn-primary{background:var(--amber); color:var(--navy-dark);}
+  .btn-ghost{background:transparent; border:1px solid rgba(255,255,255,.4); color:#fff;}
+  .btn-ok{background:var(--ok); color:#fff;}
+  .btn-danger{background:#fff; border:1px solid var(--warn); color:var(--warn);}
+  .btn-amber{background:var(--amber); color:var(--navy-dark);}
+  .btn-sm{padding:6px 11px; font-size:12.5px;}
+  main{max-width:1080px; margin:0 auto; padding:26px;}
+  .panel{background:#fff; border:1px solid var(--line); border-radius:10px; padding:20px 22px; margin-bottom:20px;}
+  .panel h2{margin:0 0 4px; font-size:16px; color:var(--navy-dark);}
+  .hint{font-size:12.5px; color:var(--ink-soft); margin:0 0 14px;}
+  label{display:block; font-size:11.5px; text-transform:uppercase; letter-spacing:.5px; color:var(--ink-soft); margin-bottom:5px; font-weight:600;}
+  input,select{width:100%; padding:9px 10px; border:1px solid var(--line); border-radius:6px; font-size:14px; background:#fbfcfd;}
+  input:focus,select:focus{outline:2px solid var(--amber); outline-offset:1px; border-color:var(--amber);}
+  .field{margin-bottom:14px;}
+  .grid4{display:grid; grid-template-columns:repeat(4,1fr); gap:14px;}
+  @media (max-width:720px){.grid4{grid-template-columns:1fr;}}
+  table{width:100%; border-collapse:collapse; font-size:13px;}
+  th{text-align:left; font-size:11px; text-transform:uppercase; color:var(--ink-soft); border-bottom:2px solid var(--line); padding:7px 8px; background:#F9FAFB;}
+  td{padding:7px 8px; border-bottom:1px solid var(--line);}
+  .card{border:1px solid var(--line); border-radius:8px; padding:15px 17px; margin-bottom:12px;}
+  .card-head{display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap;}
+  .card-head h3{margin:0; font-size:14.5px; color:var(--navy-dark);}
+  .card-meta{font-size:11.5px; color:var(--ink-soft); margin-top:3px;}
+  .badge{display:inline-block; padding:3px 9px; border-radius:20px; font-size:11px; font-weight:700; text-transform:uppercase;}
+  .badge-pending_head, .badge-pending_senior{background:#FCEBD2; color:var(--amber-dark);}
+  .badge-approved{background:#DCEFE4; color:var(--ok);}
+  .badge-rejected{background:#F7DEDA; color:var(--warn);}
+  .total-strip{display:flex; justify-content:space-between; align-items:center; background:#F1F4F7; color:var(--navy-dark); border-radius:8px; padding:10px 14px; margin-top:10px;}
+  .total-strip .num{font-weight:700; color:var(--navy);}
+  .row-actions{display:flex; gap:8px; margin-top:10px;}
+  .empty{text-align:center; padding:34px 20px; color:var(--ink-soft); font-size:13px;}
+  .toast{position:fixed; bottom:22px; left:50%; transform:translateX(-50%); background:var(--navy-dark); color:#fff; padding:11px 20px; border-radius:8px; font-size:13.5px; z-index:50; opacity:0; pointer-events:none; transition:opacity .2s;}
+  .toast.show{opacity:1;}
+  .login-wrap{min-height:100vh; display:flex; align-items:center; justify-content:center; padding:20px;}
+  .login-card{background:#fff; border:1px solid var(--line); border-radius:12px; padding:34px 30px; width:100%; max-width:360px;}
+  .login-card .clockmark{margin:0 auto 14px;}
+  .login-card h1{text-align:center; font-size:18px; margin:0 0 4px;}
+  .login-card p{text-align:center; font-size:12.5px; color:var(--ink-soft); margin:0 0 22px;}
+  .tabs{display:flex; gap:6px; margin-bottom:16px;}
+  .tabs button{flex:1; padding:8px; border:1px solid var(--line); background:#fbfcfd; border-radius:6px; font-size:12.5px; font-weight:600; cursor:pointer;}
+  .tabs button.active{background:var(--navy); color:#fff; border-color:var(--navy);}
+  .err{color:var(--warn); font-size:12.5px; margin-top:8px; min-height:16px;}
+</style>
+</head>
+<body>
+<div class="toast" id="toast"></div>
+<div id="root"><div style="padding:60px; text-align:center; color:var(--ink-soft);">Loading&hellip;</div></div>
+
+<script>
+const SUPABASE_URL = "https://nspqyprppnguviixfif.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5zcHF5cHJwcG5ndXZpaWl4ZmlmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU1NDQ4NjIsImV4cCI6MjEwMTEyMDg2Mn0.DHCQESspyYs4OrrC1w7UVk3itMPdfHuOYVfAVSMDGKw";
+
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+const state = { session: null, me: null, requests: [], reports: null };
+
+function toast(msg){
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  clearTimeout(toast._h); toast._h = setTimeout(()=>t.classList.remove('show'), 2200);
+}
+function toMinutes(s){ if(!s) return null; const [h,m]=s.split(':').map(Number); return h*60+m; }
+function diffHours(a,b){ const s=toMinutes(a),e=toMinutes(b); if(s===null||e===null) return 0; let d=e-s; if(d<=0) d+=24*60; return d/60; }
+function fmtHours(h){ const hrs=Math.floor(h); const mins=Math.round((h-hrs)*60); return hrs+'h'+(mins?' '+mins+'m':''); }
+function roleLabel(r){ return {employee:'Employee', immediate_head:'Immediate Head', senior_ops_manager:'Senior Ops Manager', hr:'Human Resource'}[r] || r; }
+function statusLabel(s){ return {pending_head:'Awaiting Immediate Head', pending_senior:'Awaiting Senior Ops Manager', approved:'Approved', rejected:'Rejected'}[s] || s; }
+
+async function init(){
+  const { data:{ session } } = await sb.auth.getSession();
+  state.session = session;
+  if(session) await loadMe();
+  render();
+}
+sb.auth.onAuthStateChange((_evt, session)=>{ state.session = session; if(session){ loadMe().then(render); } else { state.me=null; render(); } });
+
+async function loadMe(){
+  const { data, error } = await sb.from('employees').select('*, departments(name)').eq('auth_user_id', state.session.user.id).maybeSingle();
+  if(error){ console.error(error); return; }
+  state.me = data;
+  if(state.me) await loadForRole();
+}
+
+async function login(email, password){
+  const { error } = await sb.auth.signInWithPassword({ email, password });
+  if(error){ document.getElementById('loginErr').textContent = error.message; return; }
+}
+async function logout(){ await sb.auth.signOut(); }
+
+async function loadForRole(){
+  const role = state.me.role;
+  if(role === 'employee'){
+    const { data } = await sb.from('ot_requests').select('*, ot_entries(*)').eq('employee_id', state.me.id).order('created_at', {ascending:false});
+    state.requests = data || [];
+  } else if(role === 'immediate_head' || role === 'senior_ops_manager'){
+    const { data } = await sb.from('ot_requests').select('*, ot_entries(*), employees!ot_requests_employee_id_fkey(full_name, employee_no, position)').order('created_at', {ascending:false});
+    state.requests = data || [];
+  } else if(role === 'hr'){
+    const { data } = await sb.from('ot_requests').select('*, ot_entries(*), employees!ot_requests_employee_id_fkey(full_name, employee_no, position, department_id, departments(name))').order('created_at', {ascending:false});
+    state.requests = data || [];
+  }
+}
+
+function render(){
+  const root = document.getElementById('root');
+  if(!state.session){ root.innerHTML = loginHtml(); attachLogin(); return; }
+  if(!state.me){ root.innerHTML = `<div class="login-wrap"><div class="login-card"><div class="clockmark"></div><h1>No employee record</h1><p>Your login isn't linked to an employee profile yet. Ask HR to add you in the employees table.</p><button class="btn btn-ghost" style="background:var(--navy); width:100%;" id="signout2">Sign out</button></div></div>`;
+    document.getElementById('signout2').onclick = logout; return; }
+
+  root.innerHTML = `
+  <header class="app">
+    <div class="brand"><div class="clockmark"></div>
+      <div><h1>Overtime Request Ledger</h1><div class="sub">North Breeders Corp</div></div>
+    </div>
+    <div class="who">
+      <span>${state.me.full_name}</span>
+      <span class="role-pill">${roleLabel(state.me.role)}</span>
+      <button class="btn btn-ghost" id="signout">Sign out</button>
+    </div>
+  </header>
+  <main id="main"></main>`;
+  document.getElementById('signout').onclick = logout;
+
+  const main = document.getElementById('main');
+  if(state.me.role === 'employee') main.innerHTML = employeeView();
+  else if(state.me.role === 'immediate_head') main.innerHTML = approverView('immediate_head');
+  else if(state.me.role === 'senior_ops_manager') main.innerHTML = approverView('senior_ops_manager');
+  else main.innerHTML = hrView();
+  attachViewHandlers();
+}
+
+function loginHtml(){
+  return `
+  <div class="login-wrap">
+    <div class="login-card">
+      <div class="clockmark"></div>
+      <h1>Overtime Request Ledger</h1>
+      <p>Sign in with the account HR set up for you.</p>
+      <div class="field"><label>Work Email</label><input id="email" type="email" placeholder="you@northbreeders.com"></div>
+      <div class="field"><label>Password</label><input id="password" type="password"></div>
+      <button class="btn btn-primary" id="loginBtn" style="width:100%;">Sign in</button>
+      <div class="err" id="loginErr"></div>
+    </div>
+  </div>`;
+}
+function attachLogin(){
+  document.getElementById('loginBtn').onclick = ()=> login(document.getElementById('email').value.trim(), document.getElementById('password').value);
+}
+
+let draftRows = [{rid:1, date:'', reason:'', dutyStart:'08:00', dutyEnd:'17:00', otStart:'', otEnd:''}];
+function newRow(){ return {rid:Date.now()+Math.random(), date:'', reason:'', dutyStart:'08:00', dutyEnd:'17:00', otStart:'', otEnd:''}; }
+
+function employeeView(){
+  const rowsHtml = draftRows.map(r=>{
+    const hrs = r.otStart && r.otEnd ? fmtHours(diffHours(r.otStart,r.otEnd)) : '&mdash;';
+    return `<tr data-rid="${r.rid}">
+      <td><input type="date" class="f-date" value="${r.date}"></td>
+      <td><input type="text" class="f-reason" placeholder="Reason" value="${r.reason}"></td>
+      <td><input type="time" class="f-ds" value="${r.dutyStart}"></td>
+      <td><input type="time" class="f-de" value="${r.dutyEnd}"></td>
+      <td><input type="time" class="f-os" value="${r.otStart}"></td>
+      <td><input type="time" class="f-oe" value="${r.otEnd}"></td>
+      <td class="mono row-hrs">${hrs}</td>
+      <td><button class="btn btn-danger btn-sm rm-row">&times;</button></td>
+    </tr>`;
+  }).join('');
+  const total = draftRows.reduce((s,r)=> s + (r.otStart&&r.otEnd?diffHours(r.otStart,r.otEnd):0), 0);
+
+  const list = state.requests.map(reqCard('employee')).join('') || `<div class="empty">No requests filed yet.</div>`;
+
+  return `
+  <div class="panel">
+    <h2>File an overtime request</h2>
+    <p class="hint">Period: ${state.me.position||''} &middot; ${state.me.departments?.name||''}</p>
+    <div class="field"><label>Period Covered</label><input id="f-period" placeholder="e.g. August 1&ndash;15, 2026"></div>
+    <div style="overflow-x:auto;">
+      <table><thead><tr><th>Date</th><th>Reason</th><th>Duty Start</th><th>Duty End</th><th>OT Start</th><th>OT End</th><th>Hours</th><th></th></tr></thead>
+      <tbody id="draftRows">${rowsHtml}</tbody></table>
+    </div>
+    <div class="row-actions"><button class="btn btn-ghost" style="background:#fff; border:1px solid var(--line);" id="addRow">+ Add date</button></div>
+    <div class="total-strip"><span>Total OT hours</span><span class="num mono" id="draftTotal">${fmtHours(total)}</span></div>
+    <div class="row-actions" style="margin-top:14px;"><button class="btn btn-primary" id="submitBtn">Submit for approval</button></div>
+  </div>
+  <div class="panel"><h2>My requests</h2>${list}</div>`;
+}
+
+function reqCard(viewer){
+  return (req)=>{
+    const emp = req.employees || state.me;
+    const badge = `<span class="badge badge-${req.status}">${statusLabel(req.status)}</span>`;
+    const rows = (req.ot_entries||[]).map(e=>`<tr><td class="mono">${e.entry_date}</td><td>${e.reason||'&mdash;'}</td><td class="mono">${e.duty_start||''}&ndash;${e.duty_end||''}</td><td class="mono">${e.ot_start}&ndash;${e.ot_end}</td><td class="mono">${fmtHours(e.ot_hours)}</td></tr>`).join('');
+    let actions = '';
+    if(viewer==='immediate_head' && req.status==='pending_head'){
+      actions = `<div class="row-actions"><button class="btn btn-ok btn-sm act-approve-head" data-id="${req.id}">Approve &rarr; Senior Ops Mgr</button><button class="btn btn-danger btn-sm act-reject" data-id="${req.id}">Reject</button></div>`;
+    }
+    if(viewer==='senior_ops_manager' && req.status==='pending_senior'){
+      actions = `<div class="row-actions"><button class="btn btn-ok btn-sm act-approve-senior" data-id="${req.id}">Final approve</button><button class="btn btn-danger btn-sm act-reject" data-id="${req.id}">Reject</button></div>`;
+    }
+    if(viewer==='hr' && req.status==='approved' && !req.hr_received){
+      actions = `<div class="row-actions"><button class="btn btn-amber btn-sm act-receive" data-id="${req.id}">Mark received</button></div>`;
+    }
+    return `<div class="card">
+      <div class="card-head">
+        <div><h3>${emp.full_name||''} <span style="color:var(--ink-soft); font-weight:400;">&middot; ${emp.position||''}</span></h3>
+        <div class="card-meta">Emp. No. ${emp.employee_no||'&mdash;'} &middot; Period: ${req.period||'&mdash;'} &middot; Filed ${new Date(req.created_at).toLocaleDateString()}</div></div>
+        <div>${badge}</div>
+      </div>
+      <div style="overflow-x:auto; margin-top:8px;"><table><thead><tr><th>Date</th><th>Reason</th><th>Duty</th><th>OT</th><th>Hours</th></tr></thead><tbody>${rows}</tbody></table></div>
+      <div class="total-strip"><span>Accumulated OT hours</span><span class="num mono">${fmtHours(req.total_hours)}</span></div>
+      ${actions}
+    </div>`;
+  };
+}
+
+function approverView(role){
+  const isHead = role==='immediate_head';
+  const pendingStatus = isHead ? 'pending_head' : 'pending_senior';
+  const pending = state.requests.filter(r=>r.status===pendingStatus);
+  const others = state.requests.filter(r=>r.status!==pendingStatus);
+  const reportRows = buildReportRows(state.requests.filter(r=>r.status==='approved'));
+
+  return `
+  <div class="panel">
+    <h2>Pending your approval</h2>
+    <p class="hint">${isHead? 'Approving here forwards the request to the Senior Operations Manager.' : 'This is the final approval step.'}</p>
+    ${pending.map(reqCard(role)).join('') || `<div class="empty">Nothing pending right now.</div>`}
+  </div>
+  <div class="panel"><h2>All other requests (monitoring)</h2>${others.map(reqCard(role)).join('') || `<div class="empty">Nothing here yet.</div>`}</div>
+  <div class="panel"><h2>Report &mdash; approved OT hours by employee</h2>
+    <table><thead><tr><th>Employee</th><th>Employee No.</th><th>Total OT Hours</th></tr></thead><tbody>${reportRows}</tbody></table>
+  </div>`;
+}
+
+function hrView(){
+  const approved = state.requests.filter(r=>r.status==='approved');
+  const reportRows = buildReportRows(approved, true);
+  return `
+  <div class="panel">
+    <h2>Report &mdash; accumulated OT hours</h2>
+    <p class="hint">All approved requests, department included.</p>
+    <table><thead><tr><th>Employee</th><th>Employee No.</th><th>Department</th><th>Total OT Hours</th></tr></thead><tbody>${reportRows}</tbody></table>
+  </div>
+  <div class="panel"><h2>All requests</h2>${state.requests.map(reqCard('hr')).join('') || `<div class="empty">No requests yet.</div>`}</div>`;
+}
+
+function buildReportRows(list, withDept){
+  const totals = {};
+  list.forEach(r=>{
+    const emp = r.employees || {};
+    const key = (emp.full_name||'')+'|'+(emp.employee_no||'')+'|'+(emp.departments?.name||'');
+    totals[key] = (totals[key]||0) + Number(r.total_hours||0);
+  });
+  const rows = Object.entries(totals).map(([k,v])=>{
+    const [name,no,dept] = k.split('|');
+    return withDept ? `<tr><td>${name}</td><td class="mono">${no}</td><td>${dept}</td><td class="mono">${fmtHours(v)}</td></tr>`
+      : `<tr><td>${name}</td><td class="mono">${no}</td><td class="mono">${fmtHours(v)}</td></tr>`;
+  }).join('');
+  return rows || `<tr><td colspan="4" class="empty">No approved OT yet.</td></tr>`;
+}
+
+function attachViewHandlers(){
+  document.getElementById('addRow')?.addEventListener('click', ()=>{ draftRows.push(newRow()); render(); });
+  document.querySelectorAll('.rm-row').forEach(b=> b.addEventListener('click', e=>{
+    const tr = e.target.closest('tr'); const rid = tr.dataset.rid;
+    if(draftRows.length===1){ toast('Keep at least one row'); return; }
+    draftRows = draftRows.filter(r=>String(r.rid)!==rid); render();
+  }));
+  document.querySelectorAll('#draftRows tr').forEach(tr=>{
+    const row = draftRows.find(r=>String(r.rid)===tr.dataset.rid);
+    if(!row) return;
+    tr.querySelector('.f-date').oninput = e=> row.date=e.target.value;
+    tr.querySelector('.f-reason').oninput = e=> row.reason=e.target.value;
+    tr.querySelector('.f-ds').oninput = e=> row.dutyStart=e.target.value;
+    tr.querySelector('.f-de').oninput = e=> row.dutyEnd=e.target.value;
+    tr.querySelector('.f-os').oninput = e=>{ row.otStart=e.target.value; syncTotal(); };
+    tr.querySelector('.f-oe').oninput = e=>{ row.otEnd=e.target.value; syncTotal(); };
+  });
+  document.getElementById('submitBtn')?.addEventListener('click', submitRequest);
+  document.querySelectorAll('.act-approve-head').forEach(b=> b.onclick = e=> decide(e.target.dataset.id, 'head'));
+  document.querySelectorAll('.act-approve-senior').forEach(b=> b.onclick = e=> decide(e.target.dataset.id, 'senior'));
+  document.querySelectorAll('.act-reject').forEach(b=> b.onclick = e=> decide(e.target.dataset.id, 'reject'));
+  document.querySelectorAll('.act-receive').forEach(b=> b.onclick = e=> receive(e.target.dataset.id));
+}
+function syncTotal(){
+  const total = draftRows.reduce((s,r)=> s + (r.otStart&&r.otEnd?diffHours(r.otStart,r.otEnd):0), 0);
+  document.getElementById('draftTotal').textContent = fmtHours(total);
+  document.querySelectorAll('#draftRows tr').forEach(tr=>{
+    const row = draftRows.find(r=>String(r.rid)===tr.dataset.rid);
+    if(row.otStart && row.otEnd) tr.querySelector('.row-hrs').textContent = fmtHours(diffHours(row.otStart,row.otEnd));
+  });
+}
+
+async function submitRequest(){
+  const period = document.getElementById('f-period').value.trim();
+  const valid = draftRows.filter(r=> r.date && r.otStart && r.otEnd);
+  if(valid.length===0){ toast('Add at least one complete date row'); return; }
+  const totalHours = valid.reduce((s,r)=> s+diffHours(r.otStart,r.otEnd), 0);
+
+  const { data: reqData, error: reqErr } = await sb.from('ot_requests').insert({
+    employee_id: state.me.id, period, total_hours: totalHours, status: 'pending_head'
+  }).select().single();
+  if(reqErr){ toast('Submit failed: '+reqErr.message); return; }
+
+  const entries = valid.map(r=>({
+    request_id: reqData.id, entry_date: r.date, reason: r.reason,
+    duty_start: r.dutyStart, duty_end: r.dutyEnd, ot_start: r.otStart, ot_end: r.otEnd,
+    ot_hours: diffHours(r.otStart, r.otEnd)
+  }));
+  const { error: entErr } = await sb.from('ot_entries').insert(entries);
+  if(entErr){ toast('Saved request but entries failed: '+entErr.message); }
+  else toast('Overtime request submitted');
+
+  draftRows = [newRow()];
+  await loadForRole();
+  render();
+}
+
+async function decide(id, action){
+  let update = {};
+  if(action==='head') update = { status:'pending_senior', head_approver_id: state.me.id, head_decision_at: new Date().toISOString() };
+  else if(action==='senior') update = { status:'approved', senior_approver_id: state.me.id, senior_decision_at: new Date().toISOString() };
+  else update = state.me.role==='immediate_head'
+    ? { status:'rejected', head_approver_id: state.me.id, head_decision_at: new Date().toISOString() }
+    : { status:'rejected', senior_approver_id: state.me.id, senior_decision_at: new Date().toISOString() };
+
+  const { error } = await sb.from('ot_requests').update(update).eq('id', id);
+  if(error){ toast('Could not save: '+error.message); return; }
+  toast('Saved'); await loadForRole(); render();
+}
+
+async function receive(id){
+  const { error } = await sb.from('ot_requests').update({ hr_received:true, hr_received_by: state.me.id, hr_received_at: new Date().toISOString() }).eq('id', id);
+  if(error){ toast('Could not save: '+error.message); return; }
+  toast('Marked received'); await loadForRole(); render();
+}
+
+init();
+</script>
+</body>
 </html>
