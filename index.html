@@ -76,7 +76,7 @@ const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-const state = { session: null, me: null, requests: [], reports: null };
+const state = { session: null, me: null, requests: [], reports: null, allEmployees: [] };
 
 function toast(msg){
   const t = document.getElementById('toast');
@@ -92,7 +92,8 @@ function roleLabel(r){
     employee: 'Employee', 
     immediate_head: 'Supervisor (Level 1 Approver)', 
     senior_ops_manager: 'Senior Operations Manager (Final Approver)', 
-    hr: 'Human Resource'
+    hr: 'Human Resource',
+    super_admin: 'Super Administrator'
   }[r] || r; 
 }
 
@@ -150,7 +151,6 @@ async function loadForRole(){
     const { data } = await sb.from('ot_requests').select('*, ot_entries(*)').eq('employee_id', state.me.id).order('created_at', {ascending:false});
     state.requests = data || [];
   } else if(role === 'immediate_head'){
-    // Fetch requests and filter specifically by supervisor's department
     const { data } = await sb.from('ot_requests')
       .select('*, ot_entries(*), employees!ot_requests_employee_id_fkey(full_name, employee_no, position, department_id, departments(name))')
       .order('created_at', {ascending:false});
@@ -159,13 +159,17 @@ async function loadForRole(){
       const empDept = r.employees?.department_id;
       return r.employee_id === state.me.id || empDept === state.me.department_id;
     });
-  } else if(role === 'senior_ops_manager' || role === 'hr'){
+  } else if(role === 'senior_ops_manager' || role === 'hr' || role === 'super_admin'){
     const { data } = await sb.from('ot_requests').select('*, ot_entries(*), employees!ot_requests_employee_id_fkey(full_name, employee_no, position, department_id, departments(name))').order('created_at', {ascending:false});
     state.requests = data || [];
+    if(role === 'super_admin'){
+      const { data: empData } = await sb.from('employees').select('*, departments(name)').order('full_name', {ascending:true});
+      state.allEmployees = empData || [];
+    }
   }
 }
 
-function render(){
+async function render(){
   const root = document.getElementById('root');
   if(!state.session){ root.innerHTML = loginHtml(); attachLogin(); return; }
   if(!state.me){ root.innerHTML = `<div class="login-wrap"><div class="login-card"><div class="clockmark"></div><h1>No employee record</h1><p>Your login isn't linked to an employee profile yet. Ask HR to add you in the employees table.</p><button class="btn btn-ghost" style="background:var(--navy); width:100%;" id="signout2">Sign out</button></div></div>`;
@@ -186,10 +190,11 @@ function render(){
   document.getElementById('signout').onclick = logout;
 
   const main = document.getElementById('main');
-  if(state.me.role === 'employee') main.innerHTML = employeeView();
+  if(state.me.role === 'super_admin') main.innerHTML = superAdminView();
   else if(state.me.role === 'immediate_head') main.innerHTML = supervisorView();
   else if(state.me.role === 'senior_ops_manager') main.innerHTML = approverView('senior_ops_manager');
-  else main.innerHTML = hrView();
+  else if(state.me.role === 'hr') main.innerHTML = hrView();
+  else main.innerHTML = employeeView();
   attachViewHandlers();
 }
 
@@ -266,6 +271,38 @@ function supervisorView(){
   <div class="panel"><h2>All other department requests (monitoring)</h2>${others.map(reqCard('immediate_head')).join('') || `<div class="empty">Nothing here yet.</div>`}</div>
   <div class="panel"><h2>Report &mdash; approved OT hours by department staff</h2>
     <table><thead><tr><th>Employee</th><th>Employee No.</th><th>Total OT Hours</th></tr></thead><tbody>${reportRows}</tbody></table>
+  </div>`;
+}
+
+function superAdminView(){
+  const rows = state.allEmployees.map(emp => `
+    <tr>
+      <td>${emp.full_name}</td>
+      <td class="mono">${emp.employee_no || '&mdash;'}</td>
+      <td>${emp.departments?.name || '&mdash;'}</td>
+      <td>
+        <select class="role-select" data-id="${emp.id}">
+          <option value="employee" ${emp.role==='employee'?'selected':''}>Employee</option>
+          <option value="immediate_head" ${emp.role==='immediate_head'?'selected':''}>Supervisor (Level 1)</option>
+          <option value="senior_ops_manager" ${emp.role==='senior_ops_manager'?'selected':''}>Senior Ops Manager</option>
+          <option value="hr" ${emp.role==='hr'?'selected':''}>HR</option>
+          <option value="super_admin" ${emp.role==='super_admin'?'selected':''}>Super Admin</option>
+        </select>
+      </td>
+      <td><button class="btn btn-primary btn-sm save-role" data-id="${emp.id}">Update</button></td>
+    </tr>
+  `).join('');
+
+  return `
+  <div class="panel">
+    <h2>Super Admin Dashboard &mdash; Manage Employee Roles</h2>
+    <p class="hint">Change any employee's system role instantly using the dropdowns below.</p>
+    <div style="overflow-x:auto;">
+      <table>
+        <thead><tr><th>Employee Name</th><th>Emp No.</th><th>Department</th><th>Assigned Role</th><th>Action</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
   </div>`;
 }
 
@@ -364,6 +401,20 @@ function attachViewHandlers(){
   document.querySelectorAll('.act-approve-senior').forEach(b=> b.onclick = e=> decide(e.target.dataset.id, 'senior'));
   document.querySelectorAll('.act-reject').forEach(b=> b.onclick = e=> decide(e.target.dataset.id, 'reject'));
   document.querySelectorAll('.act-receive').forEach(b=> b.onclick = e=> receive(e.target.dataset.id));
+  
+  document.querySelectorAll('.save-role').forEach(btn => {
+    btn.onclick = async (e) => {
+      const empId = e.target.dataset.id;
+      const select = document.querySelector(`.role-select[data-id="${empId}"]`);
+      const newRole = select.value;
+
+      const { error } = await sb.from('employees').update({ role: newRole }).eq('id', empId);
+      if(error){ toast('Failed to update role: '+error.message); return; }
+      toast('Role updated successfully!');
+      await loadForRole();
+      render();
+    };
+  });
 }
 function syncTotal(){
   const total = draftRows.reduce((s,r)=> s + (r.otStart&&r.otEnd?diffHours(r.otStart,r.otEnd):0), 0);
@@ -380,7 +431,6 @@ async function submitRequest(){
   if(valid.length===0){ toast('Add at least one complete date row'); return; }
   const totalHours = valid.reduce((s,r)=> s+diffHours(r.otStart,r.otEnd), 0);
 
-  // If a supervisor files an OT, automatically bypass Level 1 and route straight to Final Approver
   let initialStatus = 'pending_head';
   if (state.me.role === 'immediate_head') {
     initialStatus = 'pending_senior';
