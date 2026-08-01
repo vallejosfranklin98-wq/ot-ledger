@@ -107,10 +107,28 @@ async function loadMe(){
   if(state.me) await loadForRole();
 }
 
-async function login(email, password){
-  const { error } = await sb.auth.signInWithPassword({ email, password });
+async function login(identifier, password){
+  identifier = identifier.trim();
+  let lookupEmail = identifier;
+
+  if(!identifier.includes('@')){
+    const { data: empRecord, error: empErr } = await sb
+      .from('employees')
+      .select('auth_user_id')
+      .eq('employee_no', identifier)
+      .maybeSingle();
+
+    if(empErr || !empRecord){
+      document.getElementById('loginErr').textContent = 'Employee number not found.';
+      return;
+    }
+    lookupEmail = `emp_${identifier}@northbreeders.internal`;
+  }
+
+  const { error } = await sb.auth.signInWithPassword({ email: lookupEmail, password });
   if(error){ document.getElementById('loginErr').textContent = error.message; return; }
 }
+
 async function logout(){ await sb.auth.signOut(); }
 
 async function loadForRole(){
@@ -161,8 +179,8 @@ function loginHtml(){
     <div class="login-card">
       <div class="clockmark"></div>
       <h1>Overtime Request Ledger</h1>
-      <p>Sign in with the account HR set up for you.</p>
-      <div class="field"><label>Work Email</label><input id="email" type="email" placeholder="you@northbreeders.com"></div>
+      <p>Sign in with your Employee No. or Work Email.</p>
+      <div class="field"><label>Employee No. or Email</label><input id="email" type="text" placeholder="e.g. 0142 or you@northbreeders.com"></div>
       <div class="field"><label>Password</label><input id="password" type="password"></div>
       <button class="btn btn-primary" id="loginBtn" style="width:100%;">Sign in</button>
       <div class="err" id="loginErr"></div>
