@@ -74,8 +74,9 @@
 <div id="root"><div style="padding:60px; text-align:center; color:var(--ink-soft);">Loading&hellip;</div></div>
 
 <script>
+// Fallback directly to your known keys if environment variables aren't injected at build time
 const SUPABASE_URL = "https://nspqyprppnguviixfif.supabase.co";
-const SUPABASE_ANON_KEY = "sb_publishable_oQAMTpxTLamDkaJyJCtCvQ_F1I4-xCl";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5zcHF5cHJwcG5ndXZpaWl4ZmlmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU1NDQ4NjIsImV4cCI6MjEwMTEyMDg2Mn0.DHCQESspyYs4OrrC1w7UVk3itMPdfHuOYVfAVSMDGKw";
 
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
@@ -362,10 +363,10 @@ async function submitRequest(){
 async function decide(id, action){
   let update = {};
   if(action==='head') update = { status:'pending_senior', head_approver_id: state.me.id, head_decision_at: new Date().toISOString() };
-  else if(action==='senior') update = { status:'approved', senior_approver_id: state.me.id, senior_decision_at: new Date().toISOString() };
+  else if(action==='senior') update = { status:'approved', senior_ops_manager_id: state.me.id, senior_decision_at: new Date().toISOString() };
   else update = state.me.role==='immediate_head'
     ? { status:'rejected', head_approver_id: state.me.id, head_decision_at: new Date().toISOString() }
-    : { status:'rejected', senior_approver_id: state.me.id, senior_decision_at: new Date().toISOString() };
+    : { status:'rejected', senior_ops_manager_id: state.me.id, senior_decision_at: new Date().toISOString() };
 
   const { error } = await sb.from('ot_requests').update(update).eq('id', id);
   if(error){ toast('Could not save: '+error.message); return; }
