@@ -163,16 +163,10 @@ async function loadForRole(){
     const { data } = await sb.from('ot_requests').select('*, ot_entries(*)').eq('employee_id', state.me.id).order('created_at', {ascending:false});
     state.requests = data || [];
   } else if(role === 'immediate_head'){
-    const { data } = await sb.from('ot_requests')
-      .select('*, ot_entries(*), employees!ot_requests_employee_id_fkey(full_name, employee_no, position, department_id, departments(name))')
-      .order('created_at', {ascending:false});
-    
-    state.requests = (data || []).filter(r => {
-      const empDept = r.employees?.department_id;
-      return r.employee_id === state.me.id || empDept === state.me.department_id;
-    });
+    const { data } = await sb.from('ot_requests').select('*, ot_entries(*)').order('created_at', {ascending:false});
+    state.requests = data || [];
   } else if(role === 'senior_ops_manager' || role === 'hr' || role === 'super_admin'){
-    const { data } = await sb.from('ot_requests').select('*, ot_entries(*), employees!ot_requests_employee_id_fkey(full_name, employee_no, position, department_id, departments(name))').order('created_at', {ascending:false});
+    const { data } = await sb.from('ot_requests').select('*, ot_entries(*)').order('created_at', {ascending:false});
     state.requests = data || [];
     if(role === 'super_admin'){
       const { data: empData } = await sb.from('employees').select('*, departments(name)').order('full_name', {ascending:true});
@@ -424,7 +418,6 @@ function attachViewHandlers(){
       if(error){ toast('Failed to update role: '+error.message); return; }
       toast('Role updated successfully!');
       
-      // Update local state so it doesn't revert visually
       const targetEmp = state.allEmployees.find(emp => emp.id === empId);
       if(targetEmp) targetEmp.role = newRole;
 
