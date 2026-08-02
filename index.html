@@ -157,20 +157,35 @@ async function login(identifier, password){
 
 async function logout(){ await sb.auth.signOut(); }
 
+/* ------------------------------------------------------------
+   FIX: two-step fetch instead of an embedded join.
+   The embedded join (employees!ot_requests_employee_id_fkey(...))
+   depends on RLS allowing the read at the exact moment Postgres
+   resolves the embed, which is fragile. Fetching requests first,
+   then separately fetching only the requesters actually referenced,
+   sidesteps that entirely and is much easier to reason about.
+------------------------------------------------------------- */
 async function loadForRole(){
   const role = state.me.role;
-  const submitterJoin = 'employees!ot_requests_employee_id_fkey(full_name, employee_no, position, departments(name))';
-  
-  const { data, error } = await sb.from('ot_requests').select(`*, ot_entries(*), ${submitterJoin}`).order('created_at', {ascending:false});
-  
+
+  const { data, error } = await sb.from('ot_requests').select('*, ot_entries(*)').order('created_at', {ascending:false});
   if(error){
     console.error("Error loading requests:", error.message);
+    toast('Could not load requests: '+error.message);
     state.requests = [];
   } else {
-    state.requests = (data || []).map(r => ({
-      ...r,
-      employees: r.employees || r['employees!ot_requests_employee_id_fkey'] || null
-    }));
+    const requests = data || [];
+    const ids = [...new Set(requests.map(r => r.employee_id))];
+    let empMap = {};
+    if(ids.length){
+      const { data: emps, error: empErr } = await sb.from('employees')
+        .select('id, full_name, employee_no, position, department_id, departments(name)')
+        .in('id', ids);
+      if(empErr){ console.error("Error loading requesters:", empErr.message); toast('Could not load employee records: '+empErr.message); }
+      (emps || []).forEach(e => { empMap[e.id] = e; });
+    }
+    requests.forEach(r => { r.employees = empMap[r.employee_id] || null; });
+    state.requests = requests;
   }
 
   if(role === 'super_admin'){
@@ -316,9 +331,18 @@ function superAdminView(){
   </div>`;
 }
 
+/* ------------------------------------------------------------
+   FIX: no more `|| state.me` fallback. If the requester link is
+   genuinely missing, say so explicitly instead of silently
+   showing the viewer's own name.
+------------------------------------------------------------- */
 function reqCard(viewer){
   return (req)=>{
-    const emp = req.employees || req['employees!ot_requests_employee_id_fkey'] || state.me;
+    const emp = req.employees || {
+      full_name: '\u26a0 Unlinked employee record',
+      employee_no: 'check immediate_head_id / senior_manager_id',
+      position: ''
+    };
     const badge = `<span class="badge badge-${req.status}">${statusLabel(req.status)}</span>`;
     const rows = (req.ot_entries||[]).map(e=>`<tr><td class="mono">${e.entry_date}</td><td>${e.reason||'&mdash;'}</td><td class="mono">${e.duty_start||''}&ndash;${e.duty_end||''}</td><td class="mono">${e.ot_start}&ndash;${e.ot_end}</td><td class="mono">${fmtHours(e.ot_hours)}</td></tr>`).join('');
     let actions = '';
@@ -377,7 +401,7 @@ function hrView(){
 function buildReportRows(list, withDept){
   const totals = {};
   list.forEach(r=>{
-    const emp = r.employees || r['employees!ot_requests_employee_id_fkey'] || {};
+    const emp = r.employees || {};
     const key = (emp.full_name||'Unknown')+'|'+(emp.employee_no||'&mdash;')+'|'+(emp.departments?.name||'&mdash;');
     totals[key] = (totals[key]||0) + Number(r.total_hours||0);
   });
