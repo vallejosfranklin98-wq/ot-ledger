@@ -423,6 +423,11 @@ function attachViewHandlers(){
       const { error } = await sb.from('employees').update({ role: newRole }).eq('id', empId);
       if(error){ toast('Failed to update role: '+error.message); return; }
       toast('Role updated successfully!');
+      
+      // Update local state so it doesn't revert visually
+      const targetEmp = state.allEmployees.find(emp => emp.id === empId);
+      if(targetEmp) targetEmp.role = newRole;
+
       await loadForRole();
       render();
     };
