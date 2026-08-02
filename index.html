@@ -160,19 +160,22 @@ async function logout(){ await sb.auth.signOut(); }
 async function loadForRole(){
   const role = state.me.role;
   const submitterJoin = 'employees!ot_requests_employee_id_fkey(full_name, employee_no, position, departments(name))';
-  if(role === 'employee'){
-    const { data } = await sb.from('ot_requests').select(`*, ot_entries(*), ${submitterJoin}`).eq('employee_id', state.me.id).order('created_at', {ascending:false});
-    state.requests = data || [];
-  } else if(role === 'immediate_head'){
-    const { data } = await sb.from('ot_requests').select(`*, ot_entries(*), ${submitterJoin}`).order('created_at', {ascending:false});
-    state.requests = data || [];
-  } else if(role === 'senior_ops_manager' || role === 'hr' || role === 'super_admin'){
-    const { data } = await sb.from('ot_requests').select(`*, ot_entries(*), ${submitterJoin}`).order('created_at', {ascending:false});
-    state.requests = data || [];
-    if(role === 'super_admin'){
-      const { data: empData } = await sb.from('employees').select('*, departments(name)').order('full_name', {ascending:true});
-      state.allEmployees = empData || [];
-    }
+  
+  const { data, error } = await sb.from('ot_requests').select(`*, ot_entries(*), ${submitterJoin}`).order('created_at', {ascending:false});
+  
+  if(error){
+    console.error("Error loading requests:", error.message);
+    state.requests = [];
+  } else {
+    state.requests = (data || []).map(r => ({
+      ...r,
+      employees: r.employees || r['employees!ot_requests_employee_id_fkey'] || null
+    }));
+  }
+
+  if(role === 'super_admin'){
+    const { data: empData } = await sb.from('employees').select('*, departments(name)').order('full_name', {ascending:true});
+    state.allEmployees = empData || [];
   }
 }
 
@@ -417,7 +420,7 @@ function attachViewHandlers(){
 
       const { data, error } = await sb.from('employees').update({ role: newRole }).eq('id', empId).select();
       if(error){ toast('Failed to update role: '+error.message); return; }
-      if(!data || data.length === 0){ toast('Update blocked: you may not have permission to change this row (check RLS policy).'); return; }
+      if(!data || data.length === 0){ toast('Update blocked: check RLS policy.'); return; }
       toast('Role updated successfully!');
       
       const targetEmp = state.allEmployees.find(emp => emp.id === empId);
