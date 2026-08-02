@@ -414,8 +414,9 @@ function attachViewHandlers(){
       const select = document.querySelector(`.role-select[data-id="${empId}"]`);
       const newRole = select.value;
 
-      const { error } = await sb.from('employees').update({ role: newRole }).eq('id', empId);
+      const { data, error } = await sb.from('employees').update({ role: newRole }).eq('id', empId).select();
       if(error){ toast('Failed to update role: '+error.message); return; }
+      if(!data || data.length === 0){ toast('Update blocked: you may not have permission to change this row (check RLS policy).'); return; }
       toast('Role updated successfully!');
       
       const targetEmp = state.allEmployees.find(emp => emp.id === empId);
