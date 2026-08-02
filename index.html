@@ -115,8 +115,20 @@ async function init(){
 sb.auth.onAuthStateChange((_evt, session)=>{ state.session = session; if(session){ loadMe().then(render); } else { state.me=null; render(); } });
 
 async function loadMe(){
-  const { data, error } = await sb.from('employees').select('*, departments(name)').eq('auth_user_id', state.session.user.id).maybeSingle();
-  if(error){ console.error(error); return; }
+  const userId = state.session?.user?.id;
+  if (!userId) return;
+
+  const { data, error } = await sb
+    .from('employees')
+    .select('*, departments(name)')
+    .eq('auth_user_id', userId)
+    .maybeSingle();
+
+  if(error){ 
+    console.error("Error loading employee profile:", error.message); 
+    return; 
+  }
+  
   state.me = data;
   if(state.me) await loadForRole();
 }
