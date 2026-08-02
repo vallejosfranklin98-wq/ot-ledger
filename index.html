@@ -318,7 +318,7 @@ function superAdminView(){
 
 function reqCard(viewer){
   return (req)=>{
-    const emp = req.employees || state.me;
+    const emp = req.employees || req['employees!ot_requests_employee_id_fkey'] || state.me;
     const badge = `<span class="badge badge-${req.status}">${statusLabel(req.status)}</span>`;
     const rows = (req.ot_entries||[]).map(e=>`<tr><td class="mono">${e.entry_date}</td><td>${e.reason||'&mdash;'}</td><td class="mono">${e.duty_start||''}&ndash;${e.duty_end||''}</td><td class="mono">${e.ot_start}&ndash;${e.ot_end}</td><td class="mono">${fmtHours(e.ot_hours)}</td></tr>`).join('');
     let actions = '';
@@ -377,8 +377,8 @@ function hrView(){
 function buildReportRows(list, withDept){
   const totals = {};
   list.forEach(r=>{
-    const emp = r.employees || {};
-    const key = (emp.full_name||'')+'|'+(emp.employee_no||'')+'|'+(emp.departments?.name||'');
+    const emp = r.employees || r['employees!ot_requests_employee_id_fkey'] || {};
+    const key = (emp.full_name||'Unknown')+'|'+(emp.employee_no||'&mdash;')+'|'+(emp.departments?.name||'&mdash;');
     totals[key] = (totals[key]||0) + Number(r.total_hours||0);
   });
   const rows = Object.entries(totals).map(([k,v])=>{
