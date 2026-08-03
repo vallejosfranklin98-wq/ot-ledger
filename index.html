@@ -153,9 +153,10 @@ async function login(identifier, password){
 
   const { error } = await sb.auth.signInWithPassword({ email: lookupEmail, password });
   if(error){ document.getElementById('loginErr').textContent = error.message; return; }
+  location.reload();
 }
 
-async function logout(){ await sb.auth.signOut(); }
+async function logout(){ await sb.auth.signOut(); location.reload(); }
 
 /* ------------------------------------------------------------
    FIX: two-step fetch instead of an embedded join.
