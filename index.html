@@ -68,8 +68,15 @@
   .login-card h1{text-align:center; font-size:18px; margin:0 0 4px;}
   .login-card p{text-align:center; font-size:12.5px; color:var(--ink-soft); margin:0 0 22px;}
   .err{color:var(--warn); font-size:12.5px; margin-top:8px; min-height:16px;}
-  .checkbox-group{display:flex; flex-wrap:wrap; gap:12px; margin-top:6px;}
-  .checkbox-group label{display:flex; align-items:center; gap:5px; text-transform:none; font-size:13px; color:var(--ink); cursor:pointer;}
+  
+  /* Custom Dropdown Checklist Styles */
+  .role-dropdown-container { position: relative; display: inline-block; width: 220px; }
+  .role-dropdown-btn { width: 100%; background: #fff; border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px; text-align: left; font-size: 13.5px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; color: var(--ink); }
+  .role-dropdown-btn:after { content: "\25BC"; font-size: 10px; color: var(--ink-soft); margin-left: 6px; }
+  .role-dropdown-menu { display: none; position: absolute; left: 0; top: calc(100% + 4px); width: 100%; background: #fff; border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); padding: 8px; z-index: 100; }
+  .role-dropdown-menu.show { display: block; }
+  .role-dropdown-menu label { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 4px; font-size: 13px; text-transform: none; font-weight: normal; cursor: pointer; color: var(--ink); }
+  .role-dropdown-menu label:hover { background: var(--paper); }
 </style>
 </head>
 <body>
@@ -85,7 +92,7 @@ const sbAdminCreate = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: { persistSession: false, storageKey: 'ot-ledger-admin-create-temp' }
 });
 
-const state = { session: null, me: null, activeRole: null, requests: [], reports: null, allEmployees: [], departments: [] };
+const state = { session: null, me: null, activeRole: null, requests: [], reports: [], allEmployees: [], departments: [] };
 
 function toast(msg){
   const t = document.getElementById('toast');
@@ -140,11 +147,9 @@ async function loadMe(){
   
   state.me = data;
   if(state.me){
-    // Ensure roles array is populated, falling back to legacy single role column if empty
     if(!state.me.roles || state.me.roles.length === 0){
       state.me.roles = state.me.role ? [state.me.role] : ['employee'];
     }
-    // Set default active role if not already set or not included in current roles
     if(!state.activeRole || !state.me.roles.includes(state.activeRole)){
       state.activeRole = state.me.roles[0];
     }
@@ -361,6 +366,8 @@ function superAdminView(){
       <label><input type="checkbox" class="role-chk-${emp.id}" value="${r.id}" ${empRoles.includes(r.id)?'checked':''}> ${r.label}</label>
     `).join('');
 
+    const selectedCountText = `${empRoles.length} role${empRoles.length > 1 ? 's' : ''} selected`;
+
     const statusBadge = emp.is_active === false 
       ? `<span class="badge badge-inactive">Deactivated</span>` 
       : `<span class="badge badge-active">Active</span>`;
@@ -374,10 +381,17 @@ function superAdminView(){
         <td>${emp.full_name} ${statusBadge}</td>
         <td class="mono">${emp.employee_no || '&mdash;'}</td>
         <td>${emp.departments?.name || '&mdash;'}</td>
-        <td><div class="checkbox-group">${checkboxesHtml}</div></td>
+        <td>
+          <div class="role-dropdown-container">
+            <button type="button" class="role-dropdown-btn" onclick="toggleRoleDropdown('${emp.id}')" id="drop-btn-${emp.id}">${selectedCountText}</button>
+            <div class="role-dropdown-menu" id="drop-menu-${emp.id}">
+              ${checkboxesHtml}
+            </div>
+          </div>
+        </td>
         <td>
           <div class="row-actions" style="margin-top:0;">
-            <button class="btn btn-primary btn-sm save-roles" data-id="${emp.id}">Save Roles</button>
+            <button class="btn btn-primary btn-sm save-roles" data-id="${emp.id}">Save</button>
             ${statusActionBtn}
             <button class="btn btn-danger btn-sm delete-emp" data-id="${emp.id}">Delete</button>
           </div>
@@ -404,12 +418,12 @@ function superAdminView(){
         <select id="ne-department"><option value="">&mdash; none &mdash;</option>${deptOptions}</select>
       </div>
       <div class="field"><label>Initial Roles</label>
-        <div class="checkbox-group" style="padding-top:4px;">
-          <label><input type="checkbox" id="ne-role-employee" value="employee" checked> Employee</label>
-          <label><input type="checkbox" id="ne-role-head" value="immediate_head"> Supervisor</label>
-          <label><input type="checkbox" id="ne-role-senior" value="senior_ops_manager"> Senior Ops</label>
-          <label><input type="checkbox" id="ne-role-hr" value="hr"> HR</label>
-          <label><input type="checkbox" id="ne-role-admin" value="super_admin"> Super Admin</label>
+        <div style="display:flex; flex-direction:column; gap:4px; padding-top:4px;">
+          <label style="text-transform:none; font-weight:normal; font-size:13px; display:flex; align-items:center; gap:5px;"><input type="checkbox" id="ne-role-employee" value="employee" checked> Employee</label>
+          <label style="text-transform:none; font-weight:normal; font-size:13px; display:flex; align-items:center; gap:5px;"><input type="checkbox" id="ne-role-head" value="immediate_head"> Supervisor</label>
+          <label style="text-transform:none; font-weight:normal; font-size:13px; display:flex; align-items:center; gap:5px;"><input type="checkbox" id="ne-role-senior" value="senior_ops_manager"> Senior Ops</label>
+          <label style="text-transform:none; font-weight:normal; font-size:13px; display:flex; align-items:center; gap:5px;"><input type="checkbox" id="ne-role-hr" value="hr"> HR</label>
+          <label style="text-transform:none; font-weight:normal; font-size:13px; display:flex; align-items:center; gap:5px;"><input type="checkbox" id="ne-role-admin" value="super_admin"> Super Admin</label>
         </div>
       </div>
       <div class="field"><label>Immediate Head</label>
@@ -424,7 +438,7 @@ function superAdminView(){
 
   <div class="panel">
     <h2>Super Admin Dashboard &mdash; Manage Employee Roles &amp; Status</h2>
-    <p class="hint">Assign multiple roles via checkboxes, soft-deactivate resigned staff while preserving history, or permanently delete accounts.</p>
+    <p class="hint">Click the role box to open the dropdown checklist, modify selections, and hit Save.</p>
     <div class="field" style="max-width:340px;">
       <label>Search Employees</label>
       <input id="admin-search" type="text" placeholder="Name or employee no." value="${adminSearchQuery.replace(/"/g,'&quot;')}">
@@ -541,6 +555,22 @@ function buildReportRows(list, withDept){
   }).join('');
   return rows || `<tr><td colspan="4" class="empty">No approved OT yet.</td></tr>`;
 }
+
+// Toggle dropdown checklist visibility
+function toggleRoleDropdown(empId) {
+  document.querySelectorAll('.role-dropdown-menu').forEach(menu => {
+    if(menu.id !== `drop-menu-${empId}`) menu.classList.remove('show');
+  });
+  const menu = document.getElementById(`drop-menu-${empId}`);
+  if(menu) menu.classList.toggle('show');
+}
+
+// Close dropdowns if clicked outside
+window.addEventListener('click', function(e) {
+  if (!e.target.closest('.role-dropdown-container')) {
+    document.querySelectorAll('.role-dropdown-menu').forEach(menu => menu.classList.remove('show'));
+  }
+});
 
 function attachViewHandlers(){
   document.getElementById('addRow')?.addEventListener('click', ()=>{ draftRows.push(newRow()); render(); });
