@@ -76,7 +76,14 @@ const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-const state = { session: null, me: null, requests: [], reports: null, allEmployees: [] };
+// Isolated client used only when Super Admin creates a new employee login.
+// Separate storage key + no persisted session, so signing up a new user
+// never overwrites or logs out the admin's own active session.
+const sbAdminCreate = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  auth: { persistSession: false, storageKey: 'ot-ledger-admin-create-temp' }
+});
+
+const state = { session: null, me: null, requests: [], reports: null, allEmployees: [], departments: [] };
 
 function toast(msg){
   const t = document.getElementById('toast');
@@ -205,6 +212,8 @@ async function loadForRole(){
   if(role === 'super_admin'){
     const { data: empData } = await sb.from('employees').select('*, departments(name)').order('full_name', {ascending:true});
     state.allEmployees = empData || [];
+    const { data: deptData } = await sb.from('departments').select('*').order('name', {ascending:true});
+    state.departments = deptData || [];
   }
 }
 
@@ -332,7 +341,42 @@ function superAdminView(){
     </tr>
   `).join('');
 
+  const deptOptions = state.departments.map(d => `<option value="${d.id}">${d.name}</option>`).join('');
+  const empOptions = state.allEmployees.map(e => `<option value="${e.id}">${e.full_name}</option>`).join('');
+
   return `
+  <div class="panel">
+    <h2>Add New Employee</h2>
+    <p class="hint">Creates both a login and an employee record in one step. Employee No. is used to build their login (e.g. emp_2160200@northbreeders.internal) &mdash; give them the Employee No. and password directly.</p>
+    <div class="grid4">
+      <div class="field"><label>Full Name</label><input id="ne-name" placeholder="Juan Dela Cruz"></div>
+      <div class="field"><label>Employee No.</label><input id="ne-empno" placeholder="e.g. 2160200"></div>
+      <div class="field"><label>Position</label><input id="ne-position" placeholder="e.g. Warehouse Lead"></div>
+      <div class="field"><label>Temporary Password</label><input id="ne-password" type="text" placeholder="min 6 characters"></div>
+    </div>
+    <div class="grid4">
+      <div class="field"><label>Department</label>
+        <select id="ne-department"><option value="">&mdash; none &mdash;</option>${deptOptions}</select>
+      </div>
+      <div class="field"><label>Role</label>
+        <select id="ne-role">
+          <option value="employee">Employee</option>
+          <option value="immediate_head">Supervisor (Level 1)</option>
+          <option value="senior_ops_manager">Senior Ops Manager</option>
+          <option value="hr">HR</option>
+          <option value="super_admin">Super Admin</option>
+        </select>
+      </div>
+      <div class="field"><label>Immediate Head</label>
+        <select id="ne-head"><option value="">&mdash; none &mdash;</option>${empOptions}</select>
+      </div>
+      <div class="field"><label>Senior Ops Manager</label>
+        <select id="ne-senior"><option value="">&mdash; none &mdash;</option>${empOptions}</select>
+      </div>
+    </div>
+    <button class="btn btn-primary" id="addEmployeeBtn">Add Employee</button>
+  </div>
+
   <div class="panel">
     <h2>Super Admin Dashboard &mdash; Manage Employee Roles</h2>
     <p class="hint">Change any employee's system role instantly using the dropdowns below.</p>
@@ -343,6 +387,30 @@ function superAdminView(){
       </table>
     </div>
   </div>`;
+}
+
+async function addEmployee({ fullName, employeeNo, position, departmentId, role, immediateHeadId, seniorManagerId, password }){
+  const email = `emp_${employeeNo}@northbreeders.internal`;
+
+  const { data: signUpData, error: signUpErr } = await sbAdminCreate.auth.signUp({ email, password });
+  if(signUpErr){ toast('Could not create login: '+signUpErr.message); return false; }
+  const newUserId = signUpData?.user?.id;
+  if(!newUserId){ toast('Signup returned no user id \u2014 check email confirmation settings in Supabase'); return false; }
+
+  const { error: insertErr } = await sb.from('employees').insert({
+    auth_user_id: newUserId,
+    employee_no: employeeNo,
+    full_name: fullName,
+    position: position || null,
+    department_id: departmentId || null,
+    role,
+    immediate_head_id: immediateHeadId || null,
+    senior_manager_id: seniorManagerId || null
+  });
+  if(insertErr){ toast('Login created but employee record failed: '+insertErr.message); return false; }
+
+  toast('Employee added successfully');
+  return true;
 }
 
 /* ------------------------------------------------------------
@@ -467,6 +535,23 @@ function attachViewHandlers(){
       await loadForRole();
       render();
     };
+  });
+
+  document.getElementById('addEmployeeBtn')?.addEventListener('click', async () => {
+    const fullName = document.getElementById('ne-name').value.trim();
+    const employeeNo = document.getElementById('ne-empno').value.trim();
+    const position = document.getElementById('ne-position').value.trim();
+    const password = document.getElementById('ne-password').value;
+    const departmentId = document.getElementById('ne-department').value;
+    const role = document.getElementById('ne-role').value;
+    const immediateHeadId = document.getElementById('ne-head').value;
+    const seniorManagerId = document.getElementById('ne-senior').value;
+
+    if(!fullName || !employeeNo){ toast('Full name and Employee No. are required'); return; }
+    if(!password || password.length < 6){ toast('Password must be at least 6 characters'); return; }
+
+    const ok = await addEmployee({ fullName, employeeNo, position, departmentId, role, immediateHeadId, seniorManagerId, password });
+    if(ok){ await loadForRole(); render(); }
   });
 }
 function syncTotal(){
