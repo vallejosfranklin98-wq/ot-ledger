@@ -265,6 +265,7 @@ function attachLogin(){
 }
 
 let draftRows = [{rid:1, date:'', reason:'', dutyStart:'08:00', dutyEnd:'17:00', otStart:'', otEnd:''}];
+let adminSearchQuery = '';
 function newRow(){ return {rid:Date.now()+Math.random(), date:'', reason:'', dutyStart:'08:00', dutyEnd:'17:00', otStart:'', otEnd:''}; }
 
 function employeeView(){
@@ -323,7 +324,15 @@ function supervisorView(){
 }
 
 function superAdminView(){
-  const rows = state.allEmployees.map(emp => `
+  const q = adminSearchQuery.trim().toLowerCase();
+  const filteredEmployees = q
+    ? state.allEmployees.filter(emp =>
+        (emp.full_name || '').toLowerCase().includes(q) ||
+        (emp.employee_no || '').toLowerCase().includes(q)
+      )
+    : state.allEmployees;
+
+  const rows = filteredEmployees.map(emp => `
     <tr>
       <td>${emp.full_name}</td>
       <td class="mono">${emp.employee_no || '&mdash;'}</td>
@@ -380,10 +389,15 @@ function superAdminView(){
   <div class="panel">
     <h2>Super Admin Dashboard &mdash; Manage Employee Roles</h2>
     <p class="hint">Change any employee's system role instantly using the dropdowns below.</p>
+    <div class="field" style="max-width:340px;">
+      <label>Search Employees</label>
+      <input id="admin-search" type="text" placeholder="Name or employee no." value="${adminSearchQuery.replace(/"/g,'&quot;')}">
+    </div>
+    <p class="hint">Showing ${filteredEmployees.length} of ${state.allEmployees.length} employees${q ? ` matching "${adminSearchQuery}"` : ''}</p>
     <div style="overflow-x:auto;">
       <table>
         <thead><tr><th>Employee Name</th><th>Emp No.</th><th>Department</th><th>Assigned Role</th><th>Action</th></tr></thead>
-        <tbody>${rows}</tbody>
+        <tbody>${rows || `<tr><td colspan="5" class="empty">No employees match that search.</td></tr>`}</tbody>
       </table>
     </div>
   </div>`;
@@ -553,6 +567,17 @@ function attachViewHandlers(){
     const ok = await addEmployee({ fullName, employeeNo, position, departmentId, role, immediateHeadId, seniorManagerId, password });
     if(ok){ await loadForRole(); render(); }
   });
+
+  const searchInput = document.getElementById('admin-search');
+  if(searchInput){
+    searchInput.oninput = (e) => {
+      adminSearchQuery = e.target.value;
+      const cursorPos = e.target.selectionStart;
+      render();
+      const newInput = document.getElementById('admin-search');
+      if(newInput){ newInput.focus(); newInput.setSelectionRange(cursorPos, cursorPos); }
+    };
+  }
 }
 function syncTotal(){
   const total = draftRows.reduce((s,r)=> s + (r.otStart&&r.otEnd?diffHours(r.otStart,r.otEnd):0), 0);
