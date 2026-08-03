@@ -169,23 +169,36 @@ async function logout(){ await sb.auth.signOut(); location.reload(); }
 async function loadForRole(){
   const role = state.me.role;
 
-  const { data, error } = await sb.from('ot_requests').select('*, ot_entries(*)').order('created_at', {ascending:false});
+  const { data, error } = await sb.from('ot_requests').select('*').order('created_at', {ascending:false});
   if(error){
     console.error("Error loading requests:", error.message);
     toast('Could not load requests: '+error.message);
     state.requests = [];
   } else {
     const requests = data || [];
-    const ids = [...new Set(requests.map(r => r.employee_id))];
+
+    // Fetch entries separately (embedded joins proved unreliable here too).
+    const reqIds = requests.map(r => r.id);
+    let entriesMap = {};
+    if(reqIds.length){
+      const { data: entries, error: entErr } = await sb.from('ot_entries').select('*').in('request_id', reqIds);
+      if(entErr){ console.error("Error loading entries:", entErr.message); toast('Could not load entries: '+entErr.message); }
+      (entries || []).forEach(e => { (entriesMap[e.request_id] = entriesMap[e.request_id] || []).push(e); });
+    }
+    requests.forEach(r => { r.ot_entries = entriesMap[r.id] || []; });
+
+    // Fetch requesters separately too (same reasoning).
+    const empIds = [...new Set(requests.map(r => r.employee_id))];
     let empMap = {};
-    if(ids.length){
+    if(empIds.length){
       const { data: emps, error: empErr } = await sb.from('employees')
         .select('id, full_name, employee_no, position, department_id, departments(name)')
-        .in('id', ids);
+        .in('id', empIds);
       if(empErr){ console.error("Error loading requesters:", empErr.message); toast('Could not load employee records: '+empErr.message); }
       (emps || []).forEach(e => { empMap[e.id] = e; });
     }
     requests.forEach(r => { r.employees = empMap[r.employee_id] || null; });
+
     state.requests = requests;
   }
 
