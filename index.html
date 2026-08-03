@@ -77,6 +77,10 @@
   .role-dropdown-menu.show { display: block; }
   .role-dropdown-menu label { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 4px; font-size: 13px; text-transform: none; font-weight: normal; cursor: pointer; color: var(--ink); }
   .role-dropdown-menu label:hover { background: var(--paper); }
+
+  /* Compact Box for Add Employee Roles */
+  .compact-roles-box { border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; background: #fbfcfd; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .compact-roles-box label { display: flex; align-items: center; gap: 6px; text-transform: none; font-weight: normal; font-size: 12.5px; color: var(--ink); cursor: pointer; margin-bottom: 0; }
 </style>
 </head>
 <body>
@@ -418,12 +422,12 @@ function superAdminView(){
         <select id="ne-department"><option value="">&mdash; none &mdash;</option>${deptOptions}</select>
       </div>
       <div class="field"><label>Initial Roles</label>
-        <div style="display:flex; flex-direction:column; gap:4px; padding-top:4px;">
-          <label style="text-transform:none; font-weight:normal; font-size:13px; display:flex; align-items:center; gap:5px;"><input type="checkbox" id="ne-role-employee" value="employee" checked> Employee</label>
-          <label style="text-transform:none; font-weight:normal; font-size:13px; display:flex; align-items:center; gap:5px;"><input type="checkbox" id="ne-role-head" value="immediate_head"> Supervisor</label>
-          <label style="text-transform:none; font-weight:normal; font-size:13px; display:flex; align-items:center; gap:5px;"><input type="checkbox" id="ne-role-senior" value="senior_ops_manager"> Senior Ops</label>
-          <label style="text-transform:none; font-weight:normal; font-size:13px; display:flex; align-items:center; gap:5px;"><input type="checkbox" id="ne-role-hr" value="hr"> HR</label>
-          <label style="text-transform:none; font-weight:normal; font-size:13px; display:flex; align-items:center; gap:5px;"><input type="checkbox" id="ne-role-admin" value="super_admin"> Super Admin</label>
+        <div class="compact-roles-box">
+          <label><input type="checkbox" id="ne-role-employee" value="employee" checked> Employee</label>
+          <label><input type="checkbox" id="ne-role-head" value="immediate_head"> Supervisor</label>
+          <label><input type="checkbox" id="ne-role-senior" value="senior_ops_manager"> Senior Ops</label>
+          <label><input type="checkbox" id="ne-role-hr" value="hr"> HR</label>
+          <label><input type="checkbox" id="ne-role-admin" value="super_admin"> Super Admin</label>
         </div>
       </div>
       <div class="field"><label>Immediate Head</label>
