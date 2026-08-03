@@ -22,8 +22,10 @@
   .clockmark::after{width:1.5px; height:11px; transform:translate(-50%,-100%) rotate(160deg);}
   header.app h1{font-size:17px; margin:0; font-weight:600;}
   header.app .sub{font-size:11.5px; color:#B9C6D6;}
-  .who{display:flex; align-items:center; gap:12px; font-size:13px;}
+  .who{display:flex; align-items:center; gap:12px; font-size:13px; flex-wrap:wrap;}
   .who .role-pill{background:rgba(255,255,255,.12); padding:4px 10px; border-radius:20px; font-size:11px; text-transform:uppercase; letter-spacing:.4px; color:var(--amber); font-weight:700;}
+  .role-switcher{background:rgba(0,0,0,0.2); border:1px solid rgba(255,255,255,0.2); color:#fff; padding:4px 8px; border-radius:6px; font-size:12px;}
+  .role-switcher option{background:var(--navy-dark); color:#fff;}
   .btn{border:none; border-radius:6px; padding:9px 15px; font-size:13.5px; font-weight:600; cursor:pointer;}
   .btn-primary{background:var(--amber); color:var(--navy-dark);}
   .btn-ghost{background:transparent; border:1px solid rgba(255,255,255,.4); color:#fff;}
@@ -52,9 +54,11 @@
   .badge-pending_head, .badge-pending_senior{background:#FCEBD2; color:var(--amber-dark);}
   .badge-approved{background:#DCEFE4; color:var(--ok);}
   .badge-rejected{background:#F7DEDA; color:var(--warn);}
+  .badge-inactive{background:#F7DEDA; color:var(--warn); margin-left:6px;}
+  .badge-active{background:#DCEFE4; color:var(--ok); margin-left:6px;}
   .total-strip{display:flex; justify-content:space-between; align-items:center; background:#F1F4F7; color:var(--navy-dark); border-radius:8px; padding:10px 14px; margin-top:10px;}
   .total-strip .num{font-weight:700; color:var(--navy);}
-  .row-actions{display:flex; gap:8px; margin-top:10px;}
+  .row-actions{display:flex; gap:8px; margin-top:10px; flex-wrap:wrap;}
   .empty{text-align:center; padding:34px 20px; color:var(--ink-soft); font-size:13px;}
   .toast{position:fixed; bottom:22px; left:50%; transform:translateX(-50%); background:var(--navy-dark); color:#fff; padding:11px 20px; border-radius:8px; font-size:13.5px; z-index:50; opacity:0; pointer-events:none; transition:opacity .2s;}
   .toast.show{opacity:1;}
@@ -64,6 +68,8 @@
   .login-card h1{text-align:center; font-size:18px; margin:0 0 4px;}
   .login-card p{text-align:center; font-size:12.5px; color:var(--ink-soft); margin:0 0 22px;}
   .err{color:var(--warn); font-size:12.5px; margin-top:8px; min-height:16px;}
+  .checkbox-group{display:flex; flex-wrap:wrap; gap:12px; margin-top:6px;}
+  .checkbox-group label{display:flex; align-items:center; gap:5px; text-transform:none; font-size:13px; color:var(--ink); cursor:pointer;}
 </style>
 </head>
 <body>
@@ -75,15 +81,11 @@ const SUPABASE_URL = "https://nspqyprppnguviiixfif.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5zcHF5cHJwcG5ndXZpaWl4ZmlmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODU1NDQ4NjIsImV4cCI6MjEwMTEyMDg2Mn0.DHCQESspyYs4OrrC1w7UVk3itMPdfHuOYVfAVSMDGKw";
 
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
-// Isolated client used only when Super Admin creates a new employee login.
-// Separate storage key + no persisted session, so signing up a new user
-// never overwrites or logs out the admin's own active session.
 const sbAdminCreate = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
   auth: { persistSession: false, storageKey: 'ot-ledger-admin-create-temp' }
 });
 
-const state = { session: null, me: null, requests: [], reports: null, allEmployees: [], departments: [] };
+const state = { session: null, me: null, activeRole: null, requests: [], reports: null, allEmployees: [], departments: [] };
 
 function toast(msg){
   const t = document.getElementById('toast');
@@ -119,7 +121,7 @@ async function init(){
   if(session) await loadMe();
   render();
 }
-sb.auth.onAuthStateChange((_evt, session)=>{ state.session = session; if(session){ loadMe().then(render); } else { state.me=null; render(); } });
+sb.auth.onAuthStateChange((_evt, session)=>{ state.session = session; if(session){ loadMe().then(render); } else { state.me=null; state.activeRole=null; render(); } });
 
 async function loadMe(){
   const userId = state.session?.user?.id;
@@ -137,7 +139,17 @@ async function loadMe(){
   }
   
   state.me = data;
-  if(state.me) await loadForRole();
+  if(state.me){
+    // Ensure roles array is populated, falling back to legacy single role column if empty
+    if(!state.me.roles || state.me.roles.length === 0){
+      state.me.roles = state.me.role ? [state.me.role] : ['employee'];
+    }
+    // Set default active role if not already set or not included in current roles
+    if(!state.activeRole || !state.me.roles.includes(state.activeRole)){
+      state.activeRole = state.me.roles[0];
+    }
+    await loadForRole();
+  }
 }
 
 async function login(identifier, password){
@@ -165,17 +177,7 @@ async function login(identifier, password){
 
 async function logout(){ await sb.auth.signOut(); location.reload(); }
 
-/* ------------------------------------------------------------
-   FIX: two-step fetch instead of an embedded join.
-   The embedded join (employees!ot_requests_employee_id_fkey(...))
-   depends on RLS allowing the read at the exact moment Postgres
-   resolves the embed, which is fragile. Fetching requests first,
-   then separately fetching only the requesters actually referenced,
-   sidesteps that entirely and is much easier to reason about.
-------------------------------------------------------------- */
 async function loadForRole(){
-  const role = state.me.role;
-
   const { data, error } = await sb.from('ot_requests').select('*').order('created_at', {ascending:false});
   if(error){
     console.error("Error loading requests:", error.message);
@@ -184,7 +186,6 @@ async function loadForRole(){
   } else {
     const requests = data || [];
 
-    // Fetch entries separately (embedded joins proved unreliable here too).
     const reqIds = requests.map(r => r.id);
     let entriesMap = {};
     if(reqIds.length){
@@ -194,7 +195,6 @@ async function loadForRole(){
     }
     requests.forEach(r => { r.ot_entries = entriesMap[r.id] || []; });
 
-    // Fetch requesters separately too (same reasoning).
     const empIds = [...new Set(requests.map(r => r.employee_id))];
     let empMap = {};
     if(empIds.length){
@@ -209,7 +209,7 @@ async function loadForRole(){
     state.requests = requests;
   }
 
-  if(role === 'super_admin'){
+  if(state.me.roles?.includes('super_admin')){
     const { data: empData } = await sb.from('employees').select('*, departments(name)').order('full_name', {ascending:true});
     state.allEmployees = empData || [];
     const { data: deptData } = await sb.from('departments').select('*').order('name', {ascending:true});
@@ -223,6 +223,12 @@ async function render(){
   if(!state.me){ root.innerHTML = `<div class="login-wrap"><div class="login-card"><div class="clockmark"></div><h1>No employee record</h1><p>Your login isn't linked to an employee profile yet. Ask HR to add you in the employees table.</p><button class="btn btn-ghost" style="background:var(--navy); width:100%;" id="signout2">Sign out</button></div></div>`;
     document.getElementById('signout2').onclick = logout; return; }
 
+  let roleSwitcherHtml = '';
+  if(state.me.roles && state.me.roles.length > 1){
+    const options = state.me.roles.map(r => `<option value="${r}" ${state.activeRole===r?'selected':''}>${roleLabel(r)}</option>`).join('');
+    roleSwitcherHtml = `<select id="roleSwitcher" class="role-switcher">${options}</select>`;
+  }
+
   root.innerHTML = `
   <header class="app">
     <div class="brand"><div class="clockmark"></div>
@@ -230,18 +236,27 @@ async function render(){
     </div>
     <div class="who">
       <span>${state.me.full_name}</span>
-      <span class="role-pill">${roleLabel(state.me.role)}</span>
+      <span class="role-pill">${roleLabel(state.activeRole)}</span>
+      ${roleSwitcherHtml}
       <button class="btn btn-ghost" id="signout">Sign out</button>
     </div>
   </header>
   <main id="main"></main>`;
   document.getElementById('signout').onclick = logout;
 
+  const switcher = document.getElementById('roleSwitcher');
+  if(switcher){
+    switcher.onchange = (e) => {
+      state.activeRole = e.target.value;
+      render();
+    };
+  }
+
   const main = document.getElementById('main');
-  if(state.me.role === 'super_admin') main.innerHTML = superAdminView();
-  else if(state.me.role === 'immediate_head') main.innerHTML = supervisorView();
-  else if(state.me.role === 'senior_ops_manager') main.innerHTML = approverView('senior_ops_manager');
-  else if(state.me.role === 'hr') main.innerHTML = hrView();
+  if(state.activeRole === 'super_admin') main.innerHTML = superAdminView();
+  else if(state.activeRole === 'immediate_head') main.innerHTML = supervisorView();
+  else if(state.activeRole === 'senior_ops_manager') main.innerHTML = approverView('senior_ops_manager');
+  else if(state.activeRole === 'hr') main.innerHTML = hrView();
   else main.innerHTML = employeeView();
   attachViewHandlers();
 }
@@ -332,23 +347,44 @@ function superAdminView(){
       )
     : state.allEmployees;
 
-  const rows = filteredEmployees.map(emp => `
-    <tr>
-      <td>${emp.full_name}</td>
-      <td class="mono">${emp.employee_no || '&mdash;'}</td>
-      <td>${emp.departments?.name || '&mdash;'}</td>
-      <td>
-        <select class="role-select" data-id="${emp.id}">
-          <option value="employee" ${emp.role==='employee'?'selected':''}>Employee</option>
-          <option value="immediate_head" ${emp.role==='immediate_head'?'selected':''}>Supervisor (Level 1)</option>
-          <option value="senior_ops_manager" ${emp.role==='senior_ops_manager'?'selected':''}>Senior Ops Manager</option>
-          <option value="hr" ${emp.role==='hr'?'selected':''}>HR</option>
-          <option value="super_admin" ${emp.role==='super_admin'?'selected':''}>Super Admin</option>
-        </select>
-      </td>
-      <td><button class="btn btn-primary btn-sm save-role" data-id="${emp.id}">Update</button></td>
-    </tr>
-  `).join('');
+  const allAvailableRoles = [
+    {id: 'employee', label: 'Employee'},
+    {id: 'immediate_head', label: 'Supervisor (Level 1)'},
+    {id: 'senior_ops_manager', label: 'Senior Ops Manager'},
+    {id: 'hr', label: 'HR'},
+    {id: 'super_admin', label: 'Super Admin'}
+  ];
+
+  const rows = filteredEmployees.map(emp => {
+    const empRoles = emp.roles || (emp.role ? [emp.role] : ['employee']);
+    const checkboxesHtml = allAvailableRoles.map(r => `
+      <label><input type="checkbox" class="role-chk-${emp.id}" value="${r.id}" ${empRoles.includes(r.id)?'checked':''}> ${r.label}</label>
+    `).join('');
+
+    const statusBadge = emp.is_active === false 
+      ? `<span class="badge badge-inactive">Deactivated</span>` 
+      : `<span class="badge badge-active">Active</span>`;
+
+    const statusActionBtn = emp.is_active === false
+      ? `<button class="btn btn-ok btn-sm toggle-status-btn" data-id="${emp.id}" data-action="true">Reactivate</button>`
+      : `<button class="btn btn-amber btn-sm toggle-status-btn" data-id="${emp.id}" data-action="false">Deactivate</button>`;
+
+    return `
+      <tr>
+        <td>${emp.full_name} ${statusBadge}</td>
+        <td class="mono">${emp.employee_no || '&mdash;'}</td>
+        <td>${emp.departments?.name || '&mdash;'}</td>
+        <td><div class="checkbox-group">${checkboxesHtml}</div></td>
+        <td>
+          <div class="row-actions" style="margin-top:0;">
+            <button class="btn btn-primary btn-sm save-roles" data-id="${emp.id}">Save Roles</button>
+            ${statusActionBtn}
+            <button class="btn btn-danger btn-sm delete-emp" data-id="${emp.id}">Delete</button>
+          </div>
+        </td>
+      </tr>
+    `;
+  }).join('');
 
   const deptOptions = state.departments.map(d => `<option value="${d.id}">${d.name}</option>`).join('');
   const empOptions = state.allEmployees.map(e => `<option value="${e.id}">${e.full_name}</option>`).join('');
@@ -367,14 +403,14 @@ function superAdminView(){
       <div class="field"><label>Department</label>
         <select id="ne-department"><option value="">&mdash; none &mdash;</option>${deptOptions}</select>
       </div>
-      <div class="field"><label>Role</label>
-        <select id="ne-role">
-          <option value="employee">Employee</option>
-          <option value="immediate_head">Supervisor (Level 1)</option>
-          <option value="senior_ops_manager">Senior Ops Manager</option>
-          <option value="hr">HR</option>
-          <option value="super_admin">Super Admin</option>
-        </select>
+      <div class="field"><label>Initial Roles</label>
+        <div class="checkbox-group" style="padding-top:4px;">
+          <label><input type="checkbox" id="ne-role-employee" value="employee" checked> Employee</label>
+          <label><input type="checkbox" id="ne-role-head" value="immediate_head"> Supervisor</label>
+          <label><input type="checkbox" id="ne-role-senior" value="senior_ops_manager"> Senior Ops</label>
+          <label><input type="checkbox" id="ne-role-hr" value="hr"> HR</label>
+          <label><input type="checkbox" id="ne-role-admin" value="super_admin"> Super Admin</label>
+        </div>
       </div>
       <div class="field"><label>Immediate Head</label>
         <select id="ne-head"><option value="">&mdash; none &mdash;</option>${empOptions}</select>
@@ -387,8 +423,8 @@ function superAdminView(){
   </div>
 
   <div class="panel">
-    <h2>Super Admin Dashboard &mdash; Manage Employee Roles</h2>
-    <p class="hint">Change any employee's system role instantly using the dropdowns below.</p>
+    <h2>Super Admin Dashboard &mdash; Manage Employee Roles &amp; Status</h2>
+    <p class="hint">Assign multiple roles via checkboxes, soft-deactivate resigned staff while preserving history, or permanently delete accounts.</p>
     <div class="field" style="max-width:340px;">
       <label>Search Employees</label>
       <input id="admin-search" type="text" placeholder="Name or employee no." value="${adminSearchQuery.replace(/"/g,'&quot;')}">
@@ -396,14 +432,14 @@ function superAdminView(){
     <p class="hint">Showing ${filteredEmployees.length} of ${state.allEmployees.length} employees${q ? ` matching "${adminSearchQuery}"` : ''}</p>
     <div style="overflow-x:auto;">
       <table>
-        <thead><tr><th>Employee Name</th><th>Emp No.</th><th>Department</th><th>Assigned Role</th><th>Action</th></tr></thead>
+        <thead><tr><th>Employee Name</th><th>Emp No.</th><th>Department</th><th>Assigned Roles</th><th>Actions</th></tr></thead>
         <tbody>${rows || `<tr><td colspan="5" class="empty">No employees match that search.</td></tr>`}</tbody>
       </table>
     </div>
   </div>`;
 }
 
-async function addEmployee({ fullName, employeeNo, position, departmentId, role, immediateHeadId, seniorManagerId, password }){
+async function addEmployee({ fullName, employeeNo, position, departmentId, roles, immediateHeadId, seniorManagerId, password }){
   const email = `emp_${employeeNo}@northbreeders.internal`;
 
   const { data: signUpData, error: signUpErr } = await sbAdminCreate.auth.signUp({ email, password });
@@ -417,9 +453,11 @@ async function addEmployee({ fullName, employeeNo, position, departmentId, role,
     full_name: fullName,
     position: position || null,
     department_id: departmentId || null,
-    role,
+    roles: roles,
+    role: roles[0] || 'employee',
     immediate_head_id: immediateHeadId || null,
-    senior_manager_id: seniorManagerId || null
+    senior_manager_id: seniorManagerId || null,
+    is_active: true
   });
   if(insertErr){ toast('Login created but employee record failed: '+insertErr.message); return false; }
 
@@ -427,11 +465,6 @@ async function addEmployee({ fullName, employeeNo, position, departmentId, role,
   return true;
 }
 
-/* ------------------------------------------------------------
-   FIX: no more `|| state.me` fallback. If the requester link is
-   genuinely missing, say so explicitly instead of silently
-   showing the viewer's own name.
-------------------------------------------------------------- */
 function reqCard(viewer){
   return (req)=>{
     const emp = req.employees || {
@@ -532,19 +565,63 @@ function attachViewHandlers(){
   document.querySelectorAll('.act-reject').forEach(b=> b.onclick = e=> decide(e.target.dataset.id, 'reject'));
   document.querySelectorAll('.act-receive').forEach(b=> b.onclick = e=> receive(e.target.dataset.id));
   
-  document.querySelectorAll('.save-role').forEach(btn => {
+  // Save multi-roles handler
+  document.querySelectorAll('.save-roles').forEach(btn => {
     btn.onclick = async (e) => {
       const empId = e.target.dataset.id;
-      const select = document.querySelector(`.role-select[data-id="${empId}"]`);
-      const newRole = select.value;
+      const checkedBoxes = document.querySelectorAll(`.role-chk-${empId}:checked`);
+      const newRoles = Array.from(checkedBoxes).map(cb => cb.value);
 
-      const { data, error } = await sb.from('employees').update({ role: newRole }).eq('id', empId).select();
-      if(error){ toast('Failed to update role: '+error.message); return; }
+      if(newRoles.length === 0){
+        toast('Select at least one role');
+        return;
+      }
+
+      const { data, error } = await sb.from('employees').update({ roles: newRoles, role: newRoles[0] }).eq('id', empId).select();
+      if(error){ toast('Failed to update roles: '+error.message); return; }
       if(!data || data.length === 0){ toast('Update blocked: check RLS policy.'); return; }
-      toast('Role updated successfully!');
+      toast('Roles updated successfully!');
       
       const targetEmp = state.allEmployees.find(emp => emp.id === empId);
-      if(targetEmp) targetEmp.role = newRole;
+      if(targetEmp) {
+        targetEmp.roles = newRoles;
+        targetEmp.role = newRoles[0];
+      }
+
+      await loadForRole();
+      render();
+    };
+  });
+
+  // Deactivate / Reactivate handler
+  document.querySelectorAll('.toggle-status-btn').forEach(btn => {
+    btn.onclick = async (e) => {
+      const empId = e.target.dataset.id;
+      const targetActiveStatus = e.target.dataset.action === 'true';
+
+      const { error } = await sb.from('employees').update({ is_active: targetActiveStatus }).eq('id', empId);
+      if(error){ toast('Failed to update status: '+error.message); return; }
+      toast(`Employee account successfully ${targetActiveStatus ? 'reactivated' : 'deactivated'}.`);
+
+      await loadForRole();
+      render();
+    };
+  });
+
+  // Permanent Delete handler
+  document.querySelectorAll('.delete-emp').forEach(btn => {
+    btn.onclick = async (e) => {
+      const empId = e.target.dataset.id;
+      const empRecord = state.allEmployees.find(emp => emp.id === empId);
+      const empName = empRecord ? empRecord.full_name : 'this employee';
+
+      if(!confirm(`WARNING: Are you sure you want to permanently delete ${empName}? This will wipe their record permanently. Ensure they are deactivated first if you want to preserve history safely.`)){
+        return;
+      }
+
+      const { error } = await sb.from('employees').delete().eq('id', empId);
+      if(error){ toast('Delete failed: '+error.message); return; }
+      toast('Employee permanently deleted.');
 
       await loadForRole();
       render();
@@ -557,14 +634,22 @@ function attachViewHandlers(){
     const position = document.getElementById('ne-position').value.trim();
     const password = document.getElementById('ne-password').value;
     const departmentId = document.getElementById('ne-department').value;
-    const role = document.getElementById('ne-role').value;
+    
+    const roles = [];
+    if(document.getElementById('ne-role-employee').checked) roles.push('employee');
+    if(document.getElementById('ne-role-head').checked) roles.push('immediate_head');
+    if(document.getElementById('ne-role-senior').checked) roles.push('senior_ops_manager');
+    if(document.getElementById('ne-role-hr').checked) roles.push('hr');
+    if(document.getElementById('ne-role-admin').checked) roles.push('super_admin');
+
     const immediateHeadId = document.getElementById('ne-head').value;
     const seniorManagerId = document.getElementById('ne-senior').value;
 
     if(!fullName || !employeeNo){ toast('Full name and Employee No. are required'); return; }
+    if(roles.length === 0){ toast('Select at least one role'); return; }
     if(!password || password.length < 6){ toast('Password must be at least 6 characters'); return; }
 
-    const ok = await addEmployee({ fullName, employeeNo, position, departmentId, role, immediateHeadId, seniorManagerId, password });
+    const ok = await addEmployee({ fullName, employeeNo, position, departmentId, roles, immediateHeadId, seniorManagerId, password });
     if(ok){ await loadForRole(); render(); }
   });
 
@@ -595,7 +680,7 @@ async function submitRequest(){
   const totalHours = valid.reduce((s,r)=> s+diffHours(r.otStart,r.otEnd), 0);
 
   let initialStatus = 'pending_head';
-  if (state.me.role === 'immediate_head') {
+  if (state.activeRole === 'immediate_head') {
     initialStatus = 'pending_senior';
   }
 
@@ -622,7 +707,7 @@ async function decide(id, action){
   let update = {};
   if(action==='head') update = { status:'pending_senior', head_approver_id: state.me.id, head_decision_at: new Date().toISOString() };
   else if(action==='senior') update = { status:'approved', senior_ops_manager_id: state.me.id, senior_decision_at: new Date().toISOString() };
-  else update = state.me.role==='immediate_head'
+  else update = state.activeRole==='immediate_head'
     ? { status:'rejected', head_approver_id: state.me.id, head_decision_at: new Date().toISOString() }
     : { status:'rejected', senior_ops_manager_id: state.me.id, senior_decision_at: new Date().toISOString() };
 
