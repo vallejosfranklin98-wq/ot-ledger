@@ -68,20 +68,12 @@
   .login-card h1{text-align:center; font-size:18px; margin:0 0 4px;}
   .login-card p{text-align:center; font-size:12.5px; color:var(--ink-soft); margin:0 0 22px;}
   .err{color:var(--warn); font-size:12.5px; margin-top:8px; min-height:16px;}
-  
-  /* Fixed Dropdown Checklist Positioning */
-  .role-dropdown-container { position: relative; display: inline-block; width: 220px; }
-  .role-dropdown-btn { width: 100%; background: #fff; border: 1px solid var(--line); border-radius: 6px; padding: 8px 12px; text-align: left; font-size: 13.5px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; color: var(--ink); }
-  .role-dropdown-btn:after { content: "\25BC"; font-size: 10px; color: var(--ink-soft); margin-left: 6px; }
-  .role-dropdown-menu { display: none; position: absolute; left: 0; top: calc(100% + 4px); width: 100%; background: #fff; border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); padding: 8px; z-index: 1000; }
-  .role-dropdown-menu.show { display: block; }
-  .role-dropdown-menu label { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 4px; font-size: 13px; text-transform: none; font-weight: normal; cursor: pointer; color: var(--ink); margin-bottom: 0; }
-  .role-dropdown-menu label:hover { background: var(--paper); }
 
-  /* Perfectly Aligned Compact Box for Add Employee Roles */
-  .compact-roles-box { border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; background: #fbfcfd; display: flex; flex-direction: column; gap: 6px; }
-  .compact-roles-row { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; width: 100%; }
-  .compact-roles-box label { display: flex; align-items: center; gap: 6px; text-transform: none; font-weight: normal; font-size: 12.5px; color: var(--ink); cursor: pointer; margin-bottom: 0; white-space: nowrap; }
+  /* Role checklist — used both in the Add Employee form and per-row in the admin table.
+     Flex-wrap means it naturally reflows to fit whatever width it's given, no empty cells. */
+  .roles-box{ border:1px solid var(--line); border-radius:6px; padding:8px 10px; background:#fbfcfd; display:flex; flex-wrap:wrap; gap:6px 16px; max-width:320px; }
+  .roles-box label{ display:flex; align-items:center; gap:6px; text-transform:none; font-weight:normal; font-size:12.5px; color:var(--ink); cursor:pointer; margin-bottom:0; white-space:nowrap; }
+  .roles-cell{ min-width:260px; }
 </style>
 </head>
 <body>
@@ -371,8 +363,6 @@ function superAdminView(){
       <label><input type="checkbox" class="role-chk-${emp.id}" value="${r.id}" ${empRoles.includes(r.id)?'checked':''}> ${r.label}</label>
     `).join('');
 
-    const selectedCountText = `${empRoles.length} role${empRoles.length > 1 ? 's' : ''} selected`;
-
     const statusBadge = emp.is_active === false 
       ? `<span class="badge badge-inactive">Deactivated</span>` 
       : `<span class="badge badge-active">Active</span>`;
@@ -386,13 +376,8 @@ function superAdminView(){
         <td>${emp.full_name} ${statusBadge}</td>
         <td class="mono">${emp.employee_no || '&mdash;'}</td>
         <td>${emp.departments?.name || '&mdash;'}</td>
-        <td>
-          <div class="role-dropdown-container">
-            <button type="button" class="role-dropdown-btn" onclick="toggleRoleDropdown('${emp.id}')" id="drop-btn-${emp.id}">${selectedCountText}</button>
-            <div class="role-dropdown-menu" id="drop-menu-${emp.id}">
-              ${checkboxesHtml}
-            </div>
-          </div>
+        <td class="roles-cell">
+          <div class="roles-box">${checkboxesHtml}</div>
         </td>
         <td>
           <div class="row-actions" style="margin-top:0;">
@@ -423,19 +408,12 @@ function superAdminView(){
         <select id="ne-department"><option value="">&mdash; none &mdash;</option>${deptOptions}</select>
       </div>
       <div class="field"><label>Initial Roles</label>
-        <div class="compact-roles-box">
-          <div class="compact-roles-row">
-            <label><input type="checkbox" id="ne-role-employee" value="employee" checked> Employee</label>
-            <label><input type="checkbox" id="ne-role-head" value="immediate_head"> Supervisor</label>
-          </div>
-          <div class="compact-roles-row">
-            <label><input type="checkbox" id="ne-role-senior" value="senior_ops_manager"> Senior Ops</label>
-            <label><input type="checkbox" id="ne-role-hr" value="hr"> HR</label>
-          </div>
-          <div class="compact-roles-row">
-            <label><input type="checkbox" id="ne-role-admin" value="super_admin"> Super Admin</label>
-            <div></div>
-          </div>
+        <div class="roles-box">
+          <label><input type="checkbox" id="ne-role-employee" value="employee" checked> Employee</label>
+          <label><input type="checkbox" id="ne-role-head" value="immediate_head"> Supervisor</label>
+          <label><input type="checkbox" id="ne-role-senior" value="senior_ops_manager"> Senior Ops</label>
+          <label><input type="checkbox" id="ne-role-hr" value="hr"> HR</label>
+          <label><input type="checkbox" id="ne-role-admin" value="super_admin"> Super Admin</label>
         </div>
       </div>
       <div class="field"><label>Immediate Head</label>
@@ -450,7 +428,7 @@ function superAdminView(){
 
   <div class="panel">
     <h2>Super Admin Dashboard &mdash; Manage Employee Roles &amp; Status</h2>
-    <p class="hint">Click the role box to open the dropdown checklist, modify selections, and hit Save.</p>
+    <p class="hint">Check or uncheck roles for each employee, then hit Save for that row.</p>
     <div class="field" style="max-width:340px;">
       <label>Search Employees</label>
       <input id="admin-search" type="text" placeholder="Name or employee no." value="${adminSearchQuery.replace(/"/g,'&quot;')}">
@@ -567,22 +545,6 @@ function buildReportRows(list, withDept){
   }).join('');
   return rows || `<tr><td colspan="4" class="empty">No approved OT yet.</td></tr>`;
 }
-
-// Toggle dropdown checklist visibility
-function toggleRoleDropdown(empId) {
-  document.querySelectorAll('.role-dropdown-menu').forEach(menu => {
-    if(menu.id !== `drop-menu-${empId}`) menu.classList.remove('show');
-  });
-  const menu = document.getElementById(`drop-menu-${empId}`);
-  if(menu) menu.classList.toggle('show');
-}
-
-// Close dropdowns if clicked outside
-window.addEventListener('click', function(e) {
-  if (!e.target.closest('.role-dropdown-container')) {
-    document.querySelectorAll('.role-dropdown-menu').forEach(menu => menu.classList.remove('show'));
-  }
-});
 
 function attachViewHandlers(){
   document.getElementById('addRow')?.addEventListener('click', ()=>{ draftRows.push(newRow()); render(); });
